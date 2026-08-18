@@ -5,7 +5,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
 import { HeldCard, PendingAction } from '../types/database';
 
 // Sample fallback cards for offline / demo mode
@@ -27,6 +27,7 @@ export const PlayerApp: React.FC = () => {
     name: string;
     player_code: string;
     table_label?: string;
+    room_code: string;
   } | null>(null);
 
   // App UI state
@@ -131,6 +132,51 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
+  // Fetch pending actions count for player
+  const fetchPendingActions = async (playerId: string) => {
+    if (isDemoMode) return;
+    try {
+      const { data } = await supabase
+        .from('pending_actions')
+        .select('*')
+        .eq('player_id', playerId)
+        .is('consumed_at', null)
+        .is('revoked_at', null);
+
+      if (data) {
+        const draws = data.filter((a) => a.action === 'draw').length;
+        const discards = data.filter((a) => a.action === 'discard').length;
+        setPendingDrawCount(draws);
+        setPendingDiscardCount(discards);
+      }
+    } catch (err) {
+      console.error('Error fetching pending actions:', err);
+    }
+  };
+
+  // Realtime Subscription for Player
+  useEffect(() => {
+    if (isDemoMode || !joinedPlayer) return;
+
+    fetchPlayerData(joinedPlayer.id, joinedPlayer.room_code, joinedPlayer.player_code);
+    fetchPendingActions(joinedPlayer.id);
+
+    const channel = supabase
+      .channel(`player_realtime_${joinedPlayer.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'held_cards', filter: `player_id=eq.${joinedPlayer.id}` }, () => {
+        fetchPlayerData(joinedPlayer.id, joinedPlayer.room_code, joinedPlayer.player_code);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_actions', filter: `player_id=eq.${joinedPlayer.id}` }, () => {
+        fetchPlayerData(joinedPlayer.id, joinedPlayer.room_code, joinedPlayer.player_code);
+        fetchPendingActions(joinedPlayer.id);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [joinedPlayer]);
+
   // Preload catalog images
   const runPreload = async () => {
     setIsPreloading(true);
@@ -197,6 +243,8 @@ export const PlayerApp: React.FC = () => {
 
     // Real Supabase join RPC call
     try {
+      await ensureAuthSession();
+
       const { data, error } = await supabase.rpc('enter_room', {
         p_room_code: cleanRoom,
         p_player_code: cleanRejoin || null,

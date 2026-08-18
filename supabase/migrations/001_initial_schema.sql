@@ -25,6 +25,7 @@ create table players (
   active       boolean not null default true,
   removed_at   timestamptz,
   last_seen    timestamptz not null default now(),
+  created_at   timestamptz not null default now(),
   unique (room_code, player_code)
 );
 

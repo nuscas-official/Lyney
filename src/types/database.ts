@@ -27,6 +27,7 @@ export interface Player {
   active: boolean;
   removed_at?: string | null;
   last_seen: string;
+  created_at: string;
 }
 
 export interface HeldCard {

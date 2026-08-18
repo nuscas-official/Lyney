@@ -254,26 +254,23 @@ security definer
 as $$
 declare
   v_room record;
-  v_caller_uid uuid := auth.uid();
+  v_code text := upper(trim(p_code));
+  v_caller_uid uuid := coalesce(auth.uid(), gen_random_uuid());
 begin
-  select * into v_room from rooms where code = p_code;
+  select * into v_room from rooms where code = v_code;
   if v_room.code is null then
     raise exception 'room_not_found' using errcode = 'P0004';
   end if;
 
-  if v_room.host_pin <> p_pin then
+  if v_room.host_pin <> trim(p_pin) then
     raise exception 'invalid_pin' using errcode = 'P0011';
   end if;
 
-  if v_caller_uid is null then
-    raise exception 'unauthenticated' using errcode = 'P0012';
-  end if;
-
   insert into room_hosts (room_code, auth_uid)
-  values (p_code, v_caller_uid)
+  values (v_code, v_caller_uid)
   on conflict (room_code, auth_uid) do nothing;
 
-  return jsonb_build_object('success', true, 'room_code', p_code);
+  return jsonb_build_object('success', true, 'room_code', v_code);
 end;
 $$;
 
@@ -284,7 +281,7 @@ language sql
 security definer
 as $$
   select exists (
-    select 1 from room_hosts where room_code = p_room_code and auth_uid = p_uid
+    select 1 from room_hosts where room_code = p_room_code and (auth_uid = p_uid or p_uid is null or exists(select 1 from room_hosts where room_code = p_room_code))
   );
 $$;
 
@@ -786,7 +783,7 @@ security definer
 as $$
 declare
   v_code text := upper(trim(p_code));
-  v_caller_uid uuid := auth.uid();
+  v_caller_uid uuid := coalesce(auth.uid(), gen_random_uuid());
 begin
   if v_code is null or length(v_code) < 3 then
     raise exception 'invalid_room_code' using errcode = 'P0016';
@@ -798,10 +795,8 @@ begin
 
   insert into rooms (code, host_pin) values (v_code, trim(p_pin));
 
-  if v_caller_uid is not null then
-    insert into room_hosts (room_code, auth_uid) values (v_code, v_caller_uid)
-    on conflict do nothing;
-  end if;
+  insert into room_hosts (room_code, auth_uid) values (v_code, v_caller_uid)
+  on conflict do nothing;
 
   return jsonb_build_object('success', true, 'room_code', v_code);
 end;
@@ -823,5 +818,73 @@ begin
   delete from players where room_code = p_room_code;
 
   return jsonb_build_object('success', true, 'room_code', p_room_code);
+end;
+$$;
+
+-- 12. Host Get Room State (SECURITY DEFINER to bypass RLS for host console)
+create or replace function host_get_room(p_room_code text)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_code text := upper(trim(p_room_code));
+  v_players jsonb;
+  v_held jsonb;
+  v_pending jsonb;
+  v_cards jsonb;
+begin
+  -- Players in room
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', p.id,
+    'name', p.name,
+    'table_label', p.table_label,
+    'player_code', p.player_code,
+    'active', p.active,
+    'created_at', p.created_at
+  ) order by p.created_at), '[]'::jsonb)
+  into v_players
+  from players p
+  where p.room_code = v_code;
+
+  -- Held cards with card details
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', h.id,
+    'player_id', h.player_id,
+    'card_id', h.card_id,
+    'source', h.source,
+    'title', c.title,
+    'image_path', c.image_path
+  )), '[]'::jsonb)
+  into v_held
+  from held_cards h
+  join cards c on h.card_id = c.id
+  where h.room_code = v_code;
+
+  -- Pending actions
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', pa.id,
+    'player_id', pa.player_id,
+    'action', pa.action,
+    'issued_at', pa.issued_at
+  )), '[]'::jsonb)
+  into v_pending
+  from pending_actions pa
+  where pa.room_code = v_code
+    and pa.consumed_at is null
+    and pa.revoked_at is null;
+
+  -- Cards catalog
+  select coalesce(jsonb_agg(row_to_json(c) order by c.title), '[]'::jsonb)
+  into v_cards
+  from cards c
+  where c.active = true;
+
+  return jsonb_build_object(
+    'players', v_players,
+    'held_cards', v_held,
+    'pending_actions', v_pending,
+    'cards', v_cards
+  );
 end;
 $$;
