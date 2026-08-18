@@ -10,6 +10,7 @@ create table cards (
 
 create table rooms (
   code        text primary key,
+  label       text not null default '',
   host_pin    text not null,
   rules       jsonb not null default '{}'::jsonb,
   created_at  timestamptz not null default now()
@@ -21,7 +22,6 @@ create table players (
   player_code  text not null,
   auth_uid     uuid,
   name         text not null,
-  table_label  text,
   active       boolean not null default true,
   removed_at   timestamptz,
   last_seen    timestamptz not null default now(),

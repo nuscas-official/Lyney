@@ -21,8 +21,7 @@ $$;
 create or replace function enter_room(
   p_room_code text,
   p_player_code text default null,
-  p_name text default null,
-  p_table_label text default null
+  p_name text default null
 )
 returns jsonb
 language plpgsql
@@ -65,8 +64,8 @@ begin
       );
     end loop;
 
-    insert into players (room_code, player_code, auth_uid, name, table_label)
-    values (p_room_code, v_new_code, v_caller_uid, trim(p_name), trim(p_table_label))
+    insert into players (room_code, player_code, auth_uid, name)
+    values (p_room_code, v_new_code, v_caller_uid, trim(p_name))
     returning * into v_player;
   else
     -- Rejoin existing player
@@ -299,11 +298,10 @@ $$;
 -- 5. Issue Permission
 create or replace function issue_permission(
   p_room_code text,
-  p_scope text, -- 'room', 'table', 'player'
+  p_scope text, -- 'room', 'player'
   p_action text, -- 'draw', 'discard'
   p_count int default 1,
-  p_target_id uuid default null,
-  p_target_table text default null
+  p_target_id uuid default null
 )
 returns jsonb
 language plpgsql
@@ -325,7 +323,6 @@ begin
       and active = true
       and (
         p_scope = 'room' or
-        (p_scope = 'table' and table_label = p_target_table) or
         (p_scope = 'player' and id = p_target_id)
       )
   loop
@@ -349,7 +346,6 @@ create or replace function close_window(
   p_scope text,
   p_action text,
   p_fulfil boolean default true,
-  p_target_table text default null,
   p_target_id uuid default null
 )
 returns jsonb
@@ -396,7 +392,6 @@ begin
         and p.active = true
         and (
           p_scope = 'room' or
-          (p_scope = 'table' and p.table_label = p_target_table) or
           (p_scope = 'player' and p.id = p_target_id)
         )
       order by pa.issued_at
@@ -448,7 +443,6 @@ begin
       and p.active = true
       and (
         p_scope = 'room' or
-        (p_scope = 'table' and p.table_label = p_target_table) or
         (p_scope = 'player' and p.id = p_target_id)
       )
     returning pa.id
@@ -560,8 +554,7 @@ $$;
 create or replace function bulk_grant(
   p_room_code text,
   p_scope text,
-  p_card_id uuid,
-  p_target_table text default null
+  p_card_id uuid
 )
 returns jsonb
 language plpgsql
@@ -580,7 +573,7 @@ begin
     select id from players
     where room_code = p_room_code
       and active = true
-      and (p_scope = 'room' or (p_scope = 'table' and table_label = p_target_table))
+      and p_scope = 'room'
   loop
     insert into held_cards (player_id, room_code, card_id, source)
     values (v_player.id, p_room_code, p_card_id, 'grant');
@@ -595,7 +588,7 @@ end;
 $$;
 
 -- 8. Player Management
-create or replace function update_player(p_player_id uuid, p_name text, p_table_label text)
+create or replace function update_player(p_player_id uuid, p_name text)
 returns jsonb
 language plpgsql
 security definer
@@ -610,8 +603,7 @@ begin
   end if;
 
   update players
-     set name = trim(p_name),
-         table_label = trim(p_table_label)
+     set name = trim(p_name)
    where id = p_player_id;
 
   return jsonb_build_object('success', true);
@@ -787,29 +779,34 @@ end;
 $$;
 
 -- 11. Create Room & Room Cleanup
-create or replace function create_room(p_code text, p_pin text)
+create or replace function create_room(p_label text, p_pin text)
 returns jsonb
 language plpgsql
 security definer
 as $$
 declare
-  v_code text := upper(trim(p_code));
+  v_label text := trim(p_label);
+  v_code text;
   v_caller_uid uuid := coalesce(auth.uid(), gen_random_uuid());
 begin
-  if v_code is null or length(v_code) < 3 then
-    raise exception 'invalid_room_code' using errcode = 'P0016';
+  if v_label is null or v_label = '' then
+    raise exception 'label_required' using errcode = 'P0019';
   end if;
 
-  if exists(select 1 from rooms where code = v_code) then
-    raise exception 'room_already_exists' using errcode = 'P0017';
-  end if;
+  -- The join code is generated, never chosen: hosts running one table each
+  -- would otherwise collide on the obvious names, and a guessable code lets
+  -- players wander into the wrong table's room.
+  loop
+    v_code := generate_player_code();
+    exit when not exists (select 1 from rooms where code = v_code);
+  end loop;
 
-  insert into rooms (code, host_pin) values (v_code, trim(p_pin));
+  insert into rooms (code, label, host_pin) values (v_code, v_label, trim(p_pin));
 
   insert into room_hosts (room_code, auth_uid) values (v_code, v_caller_uid)
   on conflict do nothing;
 
-  return jsonb_build_object('success', true, 'room_code', v_code);
+  return jsonb_build_object('success', true, 'room_code', v_code, 'label', v_label);
 end;
 $$;
 
@@ -840,16 +837,18 @@ security definer
 as $$
 declare
   v_code text := upper(trim(p_room_code));
+  v_room record;
   v_players jsonb;
   v_held jsonb;
   v_pending jsonb;
   v_cards jsonb;
 begin
+  select code, label into v_room from rooms where code = v_code;
+
   -- Players in room
   select coalesce(jsonb_agg(jsonb_build_object(
     'id', p.id,
     'name', p.name,
-    'table_label', p.table_label,
     'player_code', p.player_code,
     'active', p.active,
     'created_at', p.created_at
@@ -892,6 +891,7 @@ begin
   where c.active = true;
 
   return jsonb_build_object(
+    'room', jsonb_build_object('code', v_room.code, 'label', v_room.label),
     'players', v_players,
     'held_cards', v_held,
     'pending_actions', v_pending,

@@ -21,12 +21,10 @@ export const PlayerApp: React.FC = () => {
   const [roomCode, setRoomCode] = useState('DEMO1');
   const [rejoinCodeInput, setRejoinCodeInput] = useState('');
   const [playerName, setPlayerName] = useState('');
-  const [tableLabel, setTableLabel] = useState('Table 1');
   const [joinedPlayer, setJoinedPlayer] = useState<{
     id: string;
     name: string;
     player_code: string;
-    table_label?: string;
     room_code: string;
   } | null>(null);
 
@@ -211,7 +209,7 @@ export const PlayerApp: React.FC = () => {
     const cleanRejoin = rejoinCodeInput.trim().toUpperCase();
 
     if (!cleanRoom) {
-      setErrorMsg('Please enter a room code.');
+      setErrorMsg('Please enter the join code for your table.');
       return;
     }
 
@@ -232,7 +230,6 @@ export const PlayerApp: React.FC = () => {
         name: playerName || 'Player One',
         player_code: cleanRejoin || 'K7M-4QP',
         room_code: cleanRoom,
-        table_label: tableLabel,
       };
 
       setJoinedPlayer(playerObj);
@@ -249,7 +246,6 @@ export const PlayerApp: React.FC = () => {
         p_room_code: cleanRoom,
         p_player_code: cleanRejoin || null,
         p_name: playerName.trim() || null,
-        p_table_label: tableLabel.trim() || null,
       });
 
       if (error) {
@@ -414,13 +410,13 @@ export const PlayerApp: React.FC = () => {
           <form onSubmit={handleJoin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Room Code <span className="text-rose-400">*</span>
+                Join Code <span className="text-rose-400">*</span>
               </label>
               <input
                 type="text"
                 value={roomCode}
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="e.g. ROOM01"
+                placeholder="e.g. K7M4QP"
                 className="w-full px-4 py-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 font-mono tracking-wider focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors uppercase"
                 required
               />
@@ -461,19 +457,6 @@ export const PlayerApp: React.FC = () => {
                 </div>
               </div>
             )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Table Assignment
-              </label>
-              <input
-                type="text"
-                value={tableLabel}
-                onChange={(e) => setTableLabel(e.target.value)}
-                placeholder="e.g. Table 4"
-                className="w-full px-4 py-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              />
-            </div>
 
             <button
               type="submit"
@@ -519,7 +502,7 @@ export const PlayerApp: React.FC = () => {
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-100 leading-tight">{joinedPlayer.name}</h2>
-            <p className="text-[11px] font-medium text-slate-400">{joinedPlayer.table_label || 'Unassigned Table'}</p>
+            <p className="text-[11px] font-medium text-slate-400 font-mono">{joinedPlayer.room_code}</p>
           </div>
         </div>
 

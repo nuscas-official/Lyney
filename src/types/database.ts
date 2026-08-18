@@ -8,6 +8,7 @@ export interface Card {
 
 export interface Room {
   code: string;
+  label: string;
   host_pin: string;
   rules: {
     no_duplicates_in_hand?: boolean;
@@ -23,7 +24,6 @@ export interface Player {
   player_code: string;
   auth_uid?: string | null;
   name: string;
-  table_label?: string | null;
   active: boolean;
   removed_at?: string | null;
   last_seen: string;

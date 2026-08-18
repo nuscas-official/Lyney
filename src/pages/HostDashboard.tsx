@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, Users, Sparkles, Layers, RotateCcw, Plus, Trash2, 
   Eye, Edit3, UserX, UserCheck, RefreshCw, Upload, CheckCircle, 
-  AlertTriangle, ChevronRight, ChevronDown, Sliders, X, Search
+  AlertTriangle, Sliders, X, Search
 } from 'lucide-react';
 import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
 import { CardView } from '../components/CardView';
@@ -19,7 +19,6 @@ const INITIAL_DEMO_CARDS: Card[] = [
 interface HostPlayer {
   id: string;
   name: string;
-  table_label: string;
   player_code: string;
   active: boolean;
   hand: Array<{ held_card_id: string; card_id: string; title: string; image_path: string; source: 'draw' | 'grant' }>;
@@ -27,11 +26,11 @@ interface HostPlayer {
 }
 
 const INITIAL_DEMO_PLAYERS: HostPlayer[] = [
-  { id: 'p1', name: 'Alex Morgan', table_label: 'Table 1', player_code: 'K7M-4QP', active: true, hand: [
+  { id: 'p1', name: 'Alex Morgan', player_code: 'K7M-4QP', active: true, hand: [
     { held_card_id: 'h1', card_id: 'c1', title: 'Shield of Faith', image_path: INITIAL_DEMO_CARDS[0].image_path, source: 'draw' }
   ], hasActedInWindow: true },
-  { id: 'p2', name: 'Jordan Lee', table_label: 'Table 1', player_code: '9X2-B7L', active: true, hand: [], hasActedInWindow: false },
-  { id: 'p3', name: 'Sam Taylor', table_label: 'Table 2', player_code: 'R4W-8TN', active: true, hand: [
+  { id: 'p2', name: 'Jordan Lee', player_code: '9X2-B7L', active: true, hand: [], hasActedInWindow: false },
+  { id: 'p3', name: 'Sam Taylor', player_code: 'R4W-8TN', active: true, hand: [
     { held_card_id: 'h3', card_id: 'c2', title: 'Phoenix Flame', image_path: INITIAL_DEMO_CARDS[1].image_path, source: 'grant' }
   ], hasActedInWindow: true }
 ];
@@ -40,7 +39,8 @@ const HOST_SESSION_KEY = 'lyney_host_session';
 
 export const HostDashboard: React.FC = () => {
   // Auth state
-  const [roomCode, setRoomCode] = useState('ROOM01');
+  const [roomCode, setRoomCode] = useState('');
+  const [roomLabel, setRoomLabel] = useState('');
   const [hostPin, setHostPin] = useState('1234');
   const [isCreatingNewRoom, setIsCreatingNewRoom] = useState(false);
   const [isHostAuthenticated, setIsHostAuthenticated] = useState(false);
@@ -56,8 +56,7 @@ export const HostDashboard: React.FC = () => {
   const [lastActionText, setLastActionText] = useState<string | null>(null);
 
   // Permission Bar Controls
-  const [permScope, setPermScope] = useState<'room' | 'table' | 'player'>('room');
-  const [targetTable, setTargetTable] = useState('Table 1');
+  const [permScope, setPermScope] = useState<'room' | 'player'>('room');
   const [targetPlayerId, setTargetPlayerId] = useState('');
   const [permAction, setPermAction] = useState<'draw' | 'discard'>('draw');
   const [permCount, setPermCount] = useState(1);
@@ -68,8 +67,6 @@ export const HostDashboard: React.FC = () => {
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [selectedGrantCardId, setSelectedGrantCardId] = useState('');
 
-  // UI state
-  const [collapsedTables, setCollapsedTables] = useState<Record<string, boolean>>({});
 
   // Fetch real room data from Supabase via host_get_room RPC
   const fetchRoomData = async () => {
@@ -84,6 +81,8 @@ export const HostDashboard: React.FC = () => {
       }
 
       if (!data) return;
+
+      if (data.room?.label) setRoomLabel(data.room.label);
 
       // Update cards catalog
       if (data.cards) {
@@ -113,7 +112,6 @@ export const HostDashboard: React.FC = () => {
         return {
           id: p.id,
           name: p.name,
-          table_label: p.table_label || 'Unassigned',
           player_code: p.player_code,
           active: p.active,
           hand: playerHeld,
@@ -183,7 +181,7 @@ export const HostDashboard: React.FC = () => {
   // Host Login / Room Creation submit
   const handleHostLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanRoom = roomCode.trim().toUpperCase();
+    let cleanRoom = roomCode.trim().toUpperCase();
 
     if (isDemoMode) {
       setIsHostAuthenticated(true);
@@ -194,18 +192,22 @@ export const HostDashboard: React.FC = () => {
       await ensureAuthSession();
 
       if (isCreatingNewRoom) {
-        const { error } = await supabase.rpc('create_room', {
-          p_code: cleanRoom,
+        // The join code comes back from the server; the host only picks a label.
+        const { data, error } = await supabase.rpc('create_room', {
+          p_label: roomLabel.trim(),
           p_pin: hostPin.trim(),
         });
         if (error) {
-          if (error.code === 'P0017' || error.message.includes('room_already_exists')) {
-            alert('A room with that code already exists. Please choose another code or click "Access Room" to login.');
+          if (error.code === 'P0019' || error.message.includes('label_required')) {
+            alert('Please name this room, e.g. "Table 3".');
           } else {
             alert(error.message);
           }
           return;
         }
+        cleanRoom = data.room_code;
+        setRoomCode(data.room_code);
+        setRoomLabel(data.label);
       } else {
         const { error: claimError } = await supabase.rpc('claim_host', {
           p_code: cleanRoom,
@@ -233,9 +235,7 @@ export const HostDashboard: React.FC = () => {
         prev.map((p) => {
           if (!p.active) return p;
           if (
-            permScope === 'room' ||
-            (permScope === 'table' && p.table_label === targetTable) ||
-            (permScope === 'player' && p.id === targetPlayerId)
+            permScope === 'room' || (permScope === 'player' && p.id === targetPlayerId)
           ) {
             return { ...p, hasActedInWindow: false };
           }
@@ -252,7 +252,6 @@ export const HostDashboard: React.FC = () => {
         p_scope: permScope,
         p_action: permAction,
         p_count: permCount,
-        p_target_table: permScope === 'table' ? targetTable : null,
         p_target_id: permScope === 'player' ? targetPlayerId || null : null,
       });
 
@@ -278,9 +277,7 @@ export const HostDashboard: React.FC = () => {
           prev.map((p) => {
             if (!p.active) return p;
             if (
-              (permScope === 'room' ||
-                (permScope === 'table' && p.table_label === targetTable) ||
-                (permScope === 'player' && p.id === targetPlayerId)) &&
+              (permScope === 'room' || (permScope === 'player' && p.id === targetPlayerId)) &&
               !p.hasActedInWindow
             ) {
               const randomCard = cards[Math.floor(Math.random() * cards.length)];
@@ -310,7 +307,6 @@ export const HostDashboard: React.FC = () => {
         p_scope: permScope,
         p_action: permAction,
         p_fulfil: permAction === 'draw',
-        p_target_table: permScope === 'table' ? targetTable : null,
         p_target_id: permScope === 'player' ? targetPlayerId || null : null,
       });
 
@@ -513,7 +509,7 @@ export const HostDashboard: React.FC = () => {
 
   // Calculate table groups
   const activePlayers = players.filter((p) => p.active);
-  const tables = Array.from(new Set(players.map((p) => p.table_label || 'Unassigned')));
+  const actedCount = activePlayers.filter((p) => p.hasActedInWindow).length;
   const totalWeight = cards.reduce((sum, c) => sum + (c.active ? c.weight : 0), 0);
 
   // 1. HOST LOGIN SCREEN
@@ -551,19 +547,38 @@ export const HostDashboard: React.FC = () => {
           </div>
 
           <form onSubmit={handleHostLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
-                Room Code
-              </label>
-              <input
-                type="text"
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="e.g. ROOM01"
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono uppercase focus:outline-none focus:border-amber-500"
-                required
-              />
-            </div>
+            {isCreatingNewRoom ? (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
+                  Room Name
+                </label>
+                <input
+                  type="text"
+                  value={roomLabel}
+                  onChange={(e) => setRoomLabel(e.target.value)}
+                  placeholder="e.g. Table 3"
+                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-amber-500"
+                  required
+                />
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Your join code is generated when the room is created.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
+                  Join Code
+                </label>
+                <input
+                  type="text"
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. K7M4QP"
+                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono uppercase focus:outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
                 {isCreatingNewRoom ? 'Set Host PIN' : 'Host PIN'}
@@ -600,11 +615,12 @@ export const HostDashboard: React.FC = () => {
           </div>
           <div>
             <h1 className="text-base font-bold text-white flex items-center gap-2">
-              Host Console <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">{roomCode}</span>
+              {roomLabel || 'Host Console'}
+              <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
+                Join code: {roomCode}
+              </span>
             </h1>
-            <p className="text-xs text-slate-400">
-              {activePlayers.length} Active Players across {tables.length} Tables
-            </p>
+            <p className="text-xs text-slate-400">{activePlayers.length} Active Players</p>
           </div>
         </div>
 
@@ -697,27 +713,11 @@ export const HostDashboard: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
                   >
                     <option value="room">Whole Room ({activePlayers.length})</option>
-                    <option value="table">Single Table</option>
                     <option value="player">Single Player</option>
                   </select>
                 </div>
 
                 {/* Scope specifics */}
-                {permScope === 'table' && (
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Select Table</label>
-                    <select
-                      value={targetTable}
-                      onChange={(e) => setTargetTable(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
-                    >
-                      {tables.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
                 {permScope === 'player' && (
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Select Player</label>
@@ -727,7 +727,7 @@ export const HostDashboard: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
                     >
                       {activePlayers.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.table_label})</option>
+                        <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
                   </div>
@@ -780,144 +780,122 @@ export const HostDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Table-Grouped Player Cards Grid */}
+            {/* Player Cards Grid */}
             <div className="space-y-4">
-              {tables.length === 0 || players.length === 0 ? (
+              {players.length === 0 ? (
                 <div className="glass-panel p-8 rounded-2xl text-center border border-slate-800">
                   <Users className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                   <h3 className="text-sm font-bold text-slate-200">No Players in Room Yet</h3>
                   <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-                    When players join room <strong className="text-indigo-300">{roomCode}</strong> from their phones, they will appear here live.
+                    Players who enter join code <strong className="text-indigo-300 font-mono">{roomCode}</strong> on their phones will appear here live.
                   </p>
                 </div>
               ) : (
-                tables.map((tableLabel) => {
-                  const tablePlayers = players.filter((p) => (p.table_label || 'Unassigned') === tableLabel);
-                  const tableActive = tablePlayers.filter((p) => p.active);
-                  const actedCount = tableActive.filter((p) => p.hasActedInWindow).length;
-                  const isCollapsed = collapsedTables[tableLabel];
+                <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
+                  <div className="px-4 sm:px-5 py-3.5 bg-slate-900/80 flex items-center justify-between border-b border-slate-800/80">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-sm font-bold text-white">Players</h3>
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[11px]">
+                        {activePlayers.length} active
+                      </span>
+                    </div>
+                    <div className="text-xs font-semibold text-slate-400">
+                      Progress: <strong className="text-amber-300">{actedCount} / {activePlayers.length}</strong> drawn
+                    </div>
+                  </div>
 
-                  return (
-                    <div key={tableLabel} className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
-                      {/* Table Header */}
+                  <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {players.map((player) => (
                       <div
-                        onClick={() =>
-                          setCollapsedTables((prev) => ({ ...prev, [tableLabel]: !isCollapsed }))
-                        }
-                        className="px-4 sm:px-5 py-3.5 bg-slate-900/80 hover:bg-slate-900 flex items-center justify-between cursor-pointer border-b border-slate-800/80 transition-colors"
+                        key={player.id}
+                        className={`p-4 rounded-xl border transition-all ${
+                          player.active
+                            ? 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700'
+                            : 'bg-slate-950/40 border-slate-900 opacity-50 grayscale'
+                        }`}
                       >
-                        <div className="flex items-center gap-3">
-                          {isCollapsed ? <ChevronRight className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                          <h3 className="text-sm font-bold text-white">{tableLabel}</h3>
-                          <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[11px]">
-                            {tableActive.length} players
-                          </span>
+                        {/* Player Row Header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                              {player.name}
+                              {!player.active && (
+                                <span className="text-[10px] font-semibold text-rose-400 bg-rose-950 px-1.5 py-0.5 rounded border border-rose-800">
+                                  Removed
+                                </span>
+                              )}
+                            </h4>
+                            <p className="text-[11px] font-mono text-amber-400/90">
+                              Code: {player.player_code}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            {player.active ? (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setSelectedPlayer(player);
+                                    setShowGrantModal(true);
+                                  }}
+                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-amber-300"
+                                  title="Grant Specific Card"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleRemovePlayer(player.id)}
+                                  className="p-1.5 bg-slate-800 hover:bg-rose-950 rounded-lg text-slate-400 hover:text-rose-400"
+                                  title="Remove Player"
+                                >
+                                  <UserX className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => handleRestorePlayer(player.id)}
+                                className="p-1.5 bg-slate-800 hover:bg-emerald-950 rounded-lg text-emerald-400"
+                                title="Restore Player"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-3 text-xs font-semibold">
-                          <span className="text-slate-400">
-                            Progress: <strong className="text-amber-300">{actedCount} / {tableActive.length}</strong> drawn
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Table Players List */}
-                      {!isCollapsed && (
-                        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {tablePlayers.map((player) => (
-                            <div
-                              key={player.id}
-                              className={`p-4 rounded-xl border transition-all ${
-                                player.active
-                                  ? 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700'
-                                  : 'bg-slate-950/40 border-slate-900 opacity-50 grayscale'
-                              }`}
-                            >
-                              {/* Player Row Header */}
-                              <div className="flex items-center justify-between mb-3">
-                                <div>
-                                  <h4 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                                    {player.name}
-                                    {!player.active && (
-                                      <span className="text-[10px] font-semibold text-rose-400 bg-rose-950 px-1.5 py-0.5 rounded border border-rose-800">
-                                        Removed
-                                      </span>
-                                    )}
-                                  </h4>
-                                  <p className="text-[11px] font-mono text-amber-400/90">
-                                    Code: {player.player_code}
-                                  </p>
-                                </div>
-
-                                <div className="flex items-center gap-1">
-                                  {player.active ? (
-                                    <>
-                                      <button
-                                        onClick={() => {
-                                          setSelectedPlayer(player);
-                                          setShowGrantModal(true);
-                                        }}
-                                        className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-amber-300"
-                                        title="Grant Specific Card"
-                                      >
-                                        <Plus className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        onClick={() => handleRemovePlayer(player.id)}
-                                        className="p-1.5 bg-slate-800 hover:bg-rose-950 rounded-lg text-slate-400 hover:text-rose-400"
-                                        title="Remove Player"
-                                      >
-                                        <UserX className="w-3.5 h-3.5" />
-                                      </button>
-                                    </>
-                                  ) : (
+                        {/* Player Hand Thumbnails */}
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                            Hand ({player.hand.length})
+                          </p>
+                          {player.hand.length === 0 ? (
+                            <p className="text-xs text-slate-600 italic">No cards held</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {player.hand.map((h) => (
+                                <div
+                                  key={h.held_card_id}
+                                  className="relative group px-2 py-1 bg-slate-850 rounded-lg border border-slate-700/60 text-xs font-medium text-slate-300 flex items-center gap-1.5"
+                                >
+                                  <span className="truncate max-w-[100px]">{h.title}</span>
+                                  {player.active && (
                                     <button
-                                      onClick={() => handleRestorePlayer(player.id)}
-                                      className="p-1.5 bg-slate-800 hover:bg-emerald-950 rounded-lg text-emerald-400"
-                                      title="Restore Player"
+                                      onClick={() => handleRevokeCard(player.id, h.held_card_id)}
+                                      className="text-slate-500 hover:text-rose-400"
+                                      title="Revoke Card"
                                     >
-                                      <UserCheck className="w-3.5 h-3.5" />
+                                      <X className="w-3 h-3" />
                                     </button>
                                   )}
                                 </div>
-                              </div>
-
-                              {/* Player Hand Thumbnails */}
-                              <div className="space-y-1.5">
-                                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                                  Hand ({player.hand.length})
-                                </p>
-                                {player.hand.length === 0 ? (
-                                  <p className="text-xs text-slate-600 italic">No cards held</p>
-                                ) : (
-                                  <div className="flex flex-wrap gap-2">
-                                    {player.hand.map((h) => (
-                                      <div
-                                        key={h.held_card_id}
-                                        className="relative group px-2 py-1 bg-slate-850 rounded-lg border border-slate-700/60 text-xs font-medium text-slate-300 flex items-center gap-1.5"
-                                      >
-                                        <span className="truncate max-w-[100px]">{h.title}</span>
-                                        {player.active && (
-                                          <button
-                                            onClick={() => handleRevokeCard(player.id, h.held_card_id)}
-                                            className="text-slate-500 hover:text-rose-400"
-                                            title="Revoke Card"
-                                          >
-                                            <X className="w-3 h-3" />
-                                          </button>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
+                              ))}
                             </div>
-                          ))}
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </>
