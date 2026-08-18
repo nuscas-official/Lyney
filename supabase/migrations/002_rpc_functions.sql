@@ -46,6 +46,17 @@ begin
       raise exception 'name_required' using errcode = 'P0005';
     end if;
 
+    -- Names must be unique per room so the host can identify players at a
+    -- glance. Removed players are included: restore_player could otherwise
+    -- resurrect a name that has since been taken.
+    if exists (
+      select 1 from players
+       where room_code = p_room_code
+         and lower(name) = lower(trim(p_name))
+    ) then
+      raise exception 'name_taken' using errcode = 'P0018';
+    end if;
+
     -- Generate unique player_code for this room
     loop
       v_new_code := generate_player_code();

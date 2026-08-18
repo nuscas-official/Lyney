@@ -255,6 +255,8 @@ export const PlayerApp: React.FC = () => {
       if (error) {
         if (error.code === 'P0003') {
           setErrorMsg("That rejoin code isn't valid for this room.");
+        } else if (error.code === 'P0018' || error.message.includes('name_taken')) {
+          setErrorMsg('Someone in this room is already using that name. Please pick another one.');
         } else {
           setErrorMsg(error.message);
         }

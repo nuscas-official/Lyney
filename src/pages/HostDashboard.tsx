@@ -36,12 +36,16 @@ const INITIAL_DEMO_PLAYERS: HostPlayer[] = [
   ], hasActedInWindow: true }
 ];
 
+const HOST_SESSION_KEY = 'lyney_host_session';
+
 export const HostDashboard: React.FC = () => {
   // Auth state
   const [roomCode, setRoomCode] = useState('ROOM01');
   const [hostPin, setHostPin] = useState('1234');
   const [isCreatingNewRoom, setIsCreatingNewRoom] = useState(false);
   const [isHostAuthenticated, setIsHostAuthenticated] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(!isDemoMode);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Tab navigation: 'overview' | 'catalog'
   const [activeTab, setActiveTab] = useState<'overview' | 'catalog'>('overview');
@@ -123,6 +127,40 @@ export const HostDashboard: React.FC = () => {
     }
   };
 
+  // Restore saved host session on load so a page refresh keeps the console open
+  useEffect(() => {
+    if (isDemoMode) return;
+
+    const saved = localStorage.getItem(HOST_SESSION_KEY);
+    if (!saved) {
+      setIsRestoringSession(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const { code, pin } = JSON.parse(saved);
+        setRoomCode(code);
+        setHostPin(pin);
+
+        await ensureAuthSession();
+        // Re-claim rather than trusting localStorage: this revalidates the PIN
+        // and re-registers the room_hosts row if the anon uid was rotated.
+        const { error } = await supabase.rpc('claim_host', { p_code: code, p_pin: pin });
+        if (error) {
+          localStorage.removeItem(HOST_SESSION_KEY);
+        } else {
+          setIsHostAuthenticated(true);
+        }
+      } catch (err) {
+        console.error('Failed to restore host session:', err);
+        localStorage.removeItem(HOST_SESSION_KEY);
+      } finally {
+        setIsRestoringSession(false);
+      }
+    })();
+  }, []);
+
   // Realtime Subscription on Room
   useEffect(() => {
     if (isDemoMode || !isHostAuthenticated) return;
@@ -178,6 +216,7 @@ export const HostDashboard: React.FC = () => {
           return;
         }
       }
+      localStorage.setItem(HOST_SESSION_KEY, JSON.stringify({ code: cleanRoom, pin: hostPin.trim() }));
       setIsHostAuthenticated(true);
     } catch (err: any) {
       alert(err.message || 'Host operation failed');
@@ -445,6 +484,33 @@ export const HostDashboard: React.FC = () => {
     }
   };
 
+  // Manual refresh so the host can re-pull room state without reloading the page
+  const handleManualRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await fetchRoomData();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem(HOST_SESSION_KEY);
+    setIsHostAuthenticated(false);
+    setPlayers([]);
+  };
+
+  // Session restore is still in flight: hold the login screen back so a refresh
+  // does not flash the PIN form at an already-authenticated host.
+  if (isRestoringSession) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <RefreshCw className="w-6 h-6 text-amber-400 animate-spin" />
+      </div>
+    );
+  }
+
   // Calculate table groups
   const activePlayers = players.filter((p) => p.active);
   const tables = Array.from(new Set(players.map((p) => p.table_label || 'Unassigned')));
@@ -564,11 +630,28 @@ export const HostDashboard: React.FC = () => {
           </div>
 
           <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 text-slate-400 hover:text-indigo-300 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            title="Refresh Room Data"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+
+          <button
             onClick={handleResetRoom}
             className="px-3 py-1.5 bg-slate-900 hover:bg-rose-950/80 border border-slate-800 hover:border-rose-500/50 text-slate-400 hover:text-rose-300 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5"
             title="Reset Session Data"
           >
             <Trash2 className="w-3.5 h-3.5" /> Reset Session
+          </button>
+
+          <button
+            onClick={handleSignOut}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white text-xs font-semibold rounded-xl transition-colors"
+            title="Sign out of host console"
+          >
+            Sign Out
           </button>
         </div>
       </header>
