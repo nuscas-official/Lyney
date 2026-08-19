@@ -122,6 +122,20 @@
            focus:border-crimson-500 focus:bg-parchment-50;
   }
 
+  /* A field that reads as secret without being a password input. Chrome only
+     offers to save credentials for forms containing type="password", and the
+     host PIN is a table-local code, not an account password -- masking it in
+     CSS keeps it hidden from onlookers and out of the password manager. */
+  .field-secret {
+    -webkit-text-security: disc;
+    text-security: disc;
+  }
+  /* Some engines mask the placeholder along with the value; keep the hint readable. */
+  .field-secret::placeholder {
+    -webkit-text-security: none;
+    text-security: none;
+  }
+
   .field-label {
     @apply block font-display font-bold text-[0.78rem] uppercase tracking-wide text-ink-600 mb-1.5;
   }

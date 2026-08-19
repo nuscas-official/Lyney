@@ -403,7 +403,7 @@ export const PlayerApp: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleJoin} className="space-y-4">
+          <form onSubmit={handleJoin} className="space-y-4" autoComplete="off">
             <div>
               <label className="field-label">
                 Join code <span className="text-pip-red">*</span>
@@ -414,6 +414,12 @@ export const PlayerApp: React.FC = () => {
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                 placeholder="e.g. 9X2B7L"
                 className="field uppercase"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                data-1p-ignore
+                data-lpignore="true"
                 required
               />
             </div>
@@ -432,6 +438,12 @@ export const PlayerApp: React.FC = () => {
                   onChange={(e) => setRejoinCodeInput(e.target.value.toUpperCase())}
                   placeholder="e.g. K7M4QP"
                   className="field uppercase pr-11"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
                 />
                 <Key className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
               </div>
@@ -450,6 +462,9 @@ export const PlayerApp: React.FC = () => {
                     onChange={(e) => setPlayerName(e.target.value)}
                     placeholder="e.g. Anikun NUSCAS"
                     className="field pr-11"
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
                     required
                   />
                   <User className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />

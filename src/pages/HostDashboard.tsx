@@ -204,6 +204,11 @@ export const HostDashboard: React.FC = () => {
         if (error) {
           if (error.code === 'P0019' || error.message.includes('label_required')) {
             alert('Please name this room, e.g. "CASuals 4".');
+          } else if (error.code === 'P0021' || error.message.includes('label_taken')) {
+            alert(
+              `A room called "${roomLabel.trim()}" already exists. Pick a different name, ` +
+                'or switch to "Access room" and enter its join code and PIN.'
+            );
           } else {
             alert(error.message);
           }
@@ -554,7 +559,7 @@ export const HostDashboard: React.FC = () => {
             </button>
           </div>
 
-          <form onSubmit={handleHostLogin} className="space-y-4">
+          <form onSubmit={handleHostLogin} className="space-y-4" autoComplete="off">
             {isCreatingNewRoom ? (
               <div>
                 <label className="field-label">Room name</label>
@@ -564,6 +569,9 @@ export const HostDashboard: React.FC = () => {
                   onChange={(e) => setRoomLabel(e.target.value)}
                   placeholder="e.g. CASuals 4"
                   className="field"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
                   required
                 />
                 <p className="text-[11px] font-semibold text-ink-400 mt-1.5">
@@ -579,6 +587,12 @@ export const HostDashboard: React.FC = () => {
                   onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                   placeholder="e.g. 9X2B7L"
                   className="field uppercase"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
                   required
                 />
               </div>
@@ -588,11 +602,17 @@ export const HostDashboard: React.FC = () => {
                 {isCreatingNewRoom ? 'Set host PIN' : 'Host PIN'}
               </label>
               <input
-                type="password"
+                type="text"
                 value={hostPin}
                 onChange={(e) => setHostPin(e.target.value)}
                 placeholder="e.g. 1234"
-                className="field"
+                className="field field-secret"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-1p-ignore
+                data-lpignore="true"
                 required
               />
             </div>
