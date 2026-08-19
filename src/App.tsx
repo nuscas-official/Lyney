@@ -1,34 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { PlayerApp } from './pages/PlayerApp';
 import { HostDashboard } from './pages/HostDashboard';
-import { Shield, Smartphone } from 'lucide-react';
+import { Gallery } from './pages/Gallery';
+import { Shield, Smartphone, Images } from 'lucide-react';
+
+type Route = 'play' | 'host' | 'gallery';
+
+const routeForPath = (path: string): Route => {
+  if (path.startsWith('/host')) return 'host';
+  if (path.startsWith('/gallery')) return 'gallery';
+  return 'play';
+};
 
 export const App: React.FC = () => {
-  const [route, setRoute] = useState<'play' | 'host'>('play');
+  const [route, setRoute] = useState<Route>('play');
 
   useEffect(() => {
-    const path = window.location.pathname;
-    if (path.startsWith('/host')) {
-      setRoute('host');
-    } else {
-      setRoute('play');
-    }
+    setRoute(routeForPath(window.location.pathname));
 
     const handlePopState = () => {
-      if (window.location.pathname.startsWith('/host')) {
-        setRoute('host');
-      } else {
-        setRoute('play');
-      }
+      setRoute(routeForPath(window.location.pathname));
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const navigateTo = (newRoute: 'play' | 'host') => {
+  const navigateTo = (newRoute: Route) => {
     setRoute(newRoute);
-    const newPath = newRoute === 'host' ? '/host' : '/play';
+    const newPath = newRoute === 'host' ? '/host' : newRoute === 'gallery' ? '/gallery' : '/play';
     window.history.pushState({}, '', newPath);
   };
 
@@ -62,11 +62,21 @@ export const App: React.FC = () => {
           >
             <img src="/images/lynette.webp" alt="" className="w-4 h-4 rounded-full object-cover" /> Host
           </button>
+          <button
+            onClick={() => navigateTo('gallery')}
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-display font-bold text-xs transition-colors ${
+              route === 'gallery'
+                ? 'bg-pip-violet text-white shadow-sticker-sm'
+                : 'text-parchment-200/70 hover:text-parchment-100'
+            }`}
+          >
+            <Images className="w-4 h-4" strokeWidth={2.75} /> Gallery
+          </button>
         </div>
       </nav>
 
       {/* Render Current Route */}
-      {route === 'host' ? <HostDashboard /> : <PlayerApp />}
+      {route === 'host' ? <HostDashboard /> : route === 'gallery' ? <Gallery /> : <PlayerApp />}
     </div>
   );
 };
