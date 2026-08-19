@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Key, User, Layers, WifiOff, AlertTriangle, CheckCircle, 
-  Sparkles, Eye, Trash2, X, RefreshCcw, Copy, ShieldAlert,
-  ArrowRight
+import {
+  Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
+  Trash2, X, Copy, ShieldAlert, ArrowRight, Plus, Minus, LogOut,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
+import { Token, Standee } from '../components/BoardBits';
 import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
-import { HeldCard, PendingAction } from '../types/database';
+import { HeldCard } from '../types/database';
 
 // Sample fallback cards for offline / demo mode
 const DEMO_CARDS = [
@@ -18,7 +18,7 @@ const DEMO_CARDS = [
 
 export const PlayerApp: React.FC = () => {
   // Session & Player state
-  const [roomCode, setRoomCode] = useState('DEMO1');
+  const [roomCode, setRoomCode] = useState('');
   const [rejoinCodeInput, setRejoinCodeInput] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [joinedPlayer, setJoinedPlayer] = useState<{
@@ -61,7 +61,7 @@ export const PlayerApp: React.FC = () => {
       try {
         const parsed = JSON.parse(savedSession);
         setJoinedPlayer(parsed.player);
-        setRoomCode(parsed.player.room_code || 'DEMO1');
+        setRoomCode(parsed.player.room_code || '');
         fetchPlayerData(parsed.player.id, parsed.player.room_code);
       } catch (err) {
         console.error('Failed to restore session:', err);
@@ -220,7 +220,7 @@ export const PlayerApp: React.FC = () => {
 
     if (isDemoMode) {
       // Mock validation logic
-      if (cleanRejoin && cleanRejoin !== 'K7M-4QP' && cleanRejoin !== 'DEMO12') {
+      if (cleanRejoin && cleanRejoin !== 'K7M4QP' && cleanRejoin !== 'K7M-4QP' && cleanRejoin !== 'DEMO12') {
         setErrorMsg("That rejoin code isn't valid for this room.");
         return;
       }
@@ -228,7 +228,7 @@ export const PlayerApp: React.FC = () => {
       const playerObj = {
         id: 'p-100',
         name: playerName || 'Player One',
-        player_code: cleanRejoin || 'K7M-4QP',
+        player_code: cleanRejoin || 'K7M4QP',
         room_code: cleanRoom,
       };
 
@@ -354,24 +354,24 @@ export const PlayerApp: React.FC = () => {
   // Render Removed State Screen
   if (isRemoved) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-500 flex items-center justify-center mb-4">
-          <ShieldAlert className="w-8 h-8" />
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+        <div className="panel taped max-w-sm w-full p-8 pt-9">
+          <Token tone="red" size="lg" icon={ShieldAlert} className="mx-auto mb-4" />
+          <h2 className="font-display text-2xl font-extrabold text-ink-800 mb-2">Off the board</h2>
+          <p className="text-sm font-semibold text-ink-500 mb-6">
+            Your host removed you from this room. Have a word with your table host to be put back on.
+          </p>
+          <button
+            onClick={() => {
+              localStorage.removeItem('lyney_player_session');
+              setIsRemoved(false);
+              setJoinedPlayer(null);
+            }}
+            className="btn-paper w-full text-sm"
+          >
+            Back to the start tile
+          </button>
         </div>
-        <h2 className="text-2xl font-bold text-slate-100 mb-2">Session Deactivated</h2>
-        <p className="text-slate-400 text-sm max-w-xs mb-6">
-          You have been removed from this room by the host. Please speak to your table host to be restored.
-        </p>
-        <button
-          onClick={() => {
-            localStorage.removeItem('lyney_player_session');
-            setIsRemoved(false);
-            setJoinedPlayer(null);
-          }}
-          className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl"
-        >
-          Return to Join Screen
-        </button>
       </div>
     );
   }
@@ -379,90 +379,86 @@ export const PlayerApp: React.FC = () => {
   // 1. JOIN SCREEN
   if (!joinedPlayer) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950/30 flex flex-col items-center justify-center p-4">
-        {/* Header Branding */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl mb-3 shadow-lg shadow-indigo-500/10">
-            <Layers className="w-8 h-8 text-indigo-400" />
-          </div>
-          <h1 className="text-4xl font-black tracking-tight text-white mb-1 font-['Outfit']">
-            Lyney
-          </h1>
-          <p className="text-xs font-semibold text-indigo-300 uppercase tracking-widest">
-            Physical Board Game Companion
+      <div className="flex-1 flex flex-col items-center justify-center p-4 py-10">
+        {/* Header branding — the "START!!!!" sign of the board */}
+        <div className="text-center mb-7">
+          <Token tone="crimson" size="lg" icon={Layers} className="mx-auto mb-3 animate-bob" />
+          <h1 className="board-sign text-5xl leading-none -rotate-2 mb-2">Lyney</h1>
+          <p className="font-display font-bold text-xs tracking-[0.18em] text-board-800">
+            Card companion · NUSCASuals
           </p>
         </div>
 
         {/* Join Card Form */}
-        <div className="w-full max-w-md glass-panel rounded-2xl p-6 sm:p-8 shadow-2xl border border-slate-800">
-          <h2 className="text-xl font-bold text-slate-100 mb-1">Join Room</h2>
-          <p className="text-xs text-slate-400 mb-6">
-            Enter room details to view your live card hand.
+        <div className="w-full max-w-md panel taped p-6 sm:p-7 pt-8">
+          <h2 className="font-display text-2xl font-extrabold text-ink-800 mb-1">Take your seat</h2>
+          <p className="text-xs font-semibold text-ink-500 mb-5">
+            Enter your table's join code to see your live hand.
           </p>
 
           {errorMsg && (
-            <div className="mb-5 p-3.5 bg-rose-950/70 border border-rose-500/40 rounded-xl text-rose-300 text-xs flex items-center gap-2.5 animate-shake">
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <div className="mb-5 p-3 slab !border-pip-red bg-pip-red/10 text-crimson-700 text-xs font-bold flex items-center gap-2.5 animate-shake">
+              <Token tone="gold" size="xs" icon={AlertTriangle} />
               <span>{errorMsg}</span>
             </div>
           )}
 
           <form onSubmit={handleJoin} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Join Code <span className="text-rose-400">*</span>
+              <label className="field-label">
+                Join code <span className="text-pip-red">*</span>
               </label>
               <input
                 type="text"
                 value={roomCode}
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="e.g. K7M4QP"
-                className="w-full px-4 py-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 font-mono tracking-wider focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors uppercase"
+                placeholder="e.g. DEMO1"
+                className="field font-mono tracking-[0.15em] uppercase"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Rejoin Code <span className="text-slate-500 text-[10px] font-normal lowercase">(optional for returning players)</span>
+              <label className="field-label">
+                Rejoin code{' '}
+                <span className="normal-case tracking-normal text-ink-400 font-semibold">
+                  (returning players)
+                </span>
               </label>
               <div className="relative">
                 <input
                   type="text"
                   value={rejoinCodeInput}
                   onChange={(e) => setRejoinCodeInput(e.target.value.toUpperCase())}
-                  placeholder="e.g. K7M-4QP"
-                  className="w-full px-4 py-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 font-mono tracking-wider focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors uppercase"
+                  placeholder="e.g. K7M4QP"
+                  className="field font-mono tracking-[0.15em] uppercase pr-11"
                 />
-                <Key className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
+                <Key className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
               </div>
             </div>
 
             {/* Display name field: required only when rejoin code is empty */}
             {!rejoinCodeInput.trim() && (
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Your Display Name <span className="text-rose-400">*</span>
+                <label className="field-label">
+                  Your name <span className="text-pip-red">*</span>
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="e.g. Alex Morgan"
-                    className="w-full px-4 py-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    placeholder="e.g. Anikun NUSCAS"
+                    className="field pr-11"
                     required
                   />
-                  <User className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
+                  <User className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
                 </div>
               </div>
             )}
 
-            <button
-              type="submit"
-              className="w-full py-3.5 mt-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all transform active:scale-[0.99]"
-            >
-              Enter Room <ArrowRight className="w-4 h-4" />
+            <button type="submit" className="btn-crimson w-full !py-4 text-base mt-1">
+              Enter room <ArrowRight className="w-4 h-4" strokeWidth={3} />
             </button>
           </form>
         </div>
@@ -472,22 +468,22 @@ export const PlayerApp: React.FC = () => {
 
   // 2. MAIN PLAYER HAND VIEW
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-24">
+    <div className="flex-1 flex flex-col pb-28">
       {/* Offline Status Banner */}
       {!isOnline && (
-        <div className="bg-amber-600 text-slate-950 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 text-center sticky top-0 z-50">
-          <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Connection dropped. Displaying last cached hand state.</span>
+        <div className="bg-pip-gold border-b-[3px] border-ink-900 px-4 py-2 font-display font-extrabold text-xs text-ink-900 flex items-center justify-center gap-2 text-center sticky top-0 z-50">
+          <WifiOff className="w-4 h-4 shrink-0" strokeWidth={2.75} />
+          <span>Offline — showing your last known hand.</span>
         </div>
       )}
 
       {/* Catalog Preloader Banner */}
       {isPreloading && (
-        <div className="bg-indigo-900/80 border-b border-indigo-500/30 px-4 py-2 text-xs font-semibold flex items-center justify-between text-indigo-200">
-          <span>Preloading artwork catalog...</span>
-          <div className="w-24 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+        <div className="path-strip border-b-[3px] border-ink-900 px-4 py-2 text-xs font-display font-bold text-ink-700 flex items-center justify-between gap-3">
+          <span>Laying out the deck…</span>
+          <div className="w-28 h-2.5 bg-white border-2 border-ink-900 rounded-full overflow-hidden">
             <div
-              className="bg-indigo-400 h-full transition-all duration-200"
+              className="bg-pip-cyan h-full transition-all duration-200"
               style={{ width: `${preloadProgress}%` }}
             />
           </div>
@@ -495,25 +491,25 @@ export const PlayerApp: React.FC = () => {
       )}
 
       {/* App Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800 px-4 py-3 flex items-center justify-between shadow-lg">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center font-bold font-['Outfit']">
-            L
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-slate-100 leading-tight">{joinedPlayer.name}</h2>
-            <p className="text-[11px] font-medium text-slate-400 font-mono">{joinedPlayer.room_code}</p>
+      <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Standee name={joinedPlayer.name} size="md" />
+          <div className="min-w-0">
+            <h2 className="font-display text-base font-extrabold text-ink-800 leading-tight truncate">
+              {joinedPlayer.name}
+            </h2>
+            <p className="text-[11px] code-stamp">{joinedPlayer.room_code}</p>
           </div>
         </div>
 
         {/* Rejoin Code Display Chip */}
         <button
           onClick={() => setShowCodeModal(true)}
-          className="px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 rounded-lg text-xs font-mono font-bold text-amber-300 flex items-center gap-1.5 shadow-sm transition-colors"
-          title="View Rejoin Code"
+          className="btn-paper !py-2 !px-3 !text-xs shrink-0"
+          title="View rejoin code"
         >
-          <Key className="w-3.5 h-3.5 text-amber-400" />
-          <span>{joinedPlayer.player_code}</span>
+          <Key className="w-3.5 h-3.5 text-crimson-500" strokeWidth={2.75} />
+          <span className="font-mono">{joinedPlayer.player_code}</span>
         </button>
       </header>
 
@@ -521,49 +517,61 @@ export const PlayerApp: React.FC = () => {
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6">
         {/* Error notification */}
         {errorMsg && (
-          <div className="mb-4 p-3 bg-rose-950/80 border border-rose-500/50 rounded-xl text-rose-300 text-xs flex items-center justify-between">
+          <div className="mb-4 p-3 slab !border-pip-red bg-pip-red/10 text-crimson-700 text-xs font-bold flex items-center justify-between gap-2">
             <span>{errorMsg}</span>
-            <button onClick={() => setErrorMsg(null)} className="p-1 text-rose-400 hover:text-rose-200">
-              <X className="w-4 h-4" />
+            <button
+              onClick={() => setErrorMsg(null)}
+              className="text-crimson-600 hover:text-crimson-800 shrink-0"
+            >
+              <X className="w-4 h-4" strokeWidth={3} />
             </button>
           </div>
         )}
 
         {/* Hand Title Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <Layers className="w-5 h-5 text-indigo-400" /> Your Hand
-            </h1>
-            <p className="text-xs text-slate-400">
-              {hand.length} {hand.length === 1 ? 'card' : 'cards'} held
-            </p>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <Token tone="violet" size="md" icon={Layers} />
+            <div>
+              <h1 className="font-display text-xl font-extrabold text-ink-800 leading-tight">Your hand</h1>
+              <p className="text-xs font-bold text-ink-500">
+                {hand.length} {hand.length === 1 ? 'card' : 'cards'} held
+              </p>
+            </div>
           </div>
 
-          {/* Quick Demo Action Trigger for testing */}
-          {isDemoMode && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {pendingDrawCount > 0 && (
+              <Token tone="cyan" size="sm" label={`+${pendingDrawCount}`} title="Draws available" />
+            )}
+            {pendingDiscardCount > 0 && (
+              <Token tone="red" size="sm" label={`−${pendingDiscardCount}`} title="Discards required" />
+            )}
+
+            {/* Quick Demo Action Trigger for testing */}
+            {isDemoMode && (
               <button
                 onClick={() => setPendingDrawCount((prev) => prev + 1)}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg border border-slate-700"
+                className="btn-icon"
+                title="Demo: grant a draw"
               >
-                + Grant Permission
+                <Plus className="w-4 h-4" strokeWidth={3} />
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Hand Cards Grid / Stack */}
         {hand.length === 0 ? (
-          <div className="min-h-[280px] rounded-2xl border-2 border-dashed border-slate-800 flex flex-col items-center justify-center p-6 text-center bg-slate-900/30">
-            <Layers className="w-12 h-12 text-slate-600 mb-3 opacity-60" />
-            <h3 className="text-sm font-semibold text-slate-300 mb-1">Your hand is currently empty</h3>
-            <p className="text-xs text-slate-500 max-w-xs">
-              When the host opens a draw window, your action button below will light up.
+          <div className="path-dashed min-h-[280px] flex flex-col items-center justify-center p-6 text-center">
+            <Token tone="paper" size="lg" icon={Layers} className="mb-3 opacity-70" />
+            <h3 className="font-display text-base font-extrabold text-ink-700 mb-1">No cards yet</h3>
+            <p className="text-xs font-semibold text-ink-500 max-w-xs">
+              When your host opens a draw window, the big button below lights up.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4 justify-items-center">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 sm:gap-5 justify-items-center">
             {hand.map((card) => (
               <CardView
                 key={card.held_card_id}
@@ -580,20 +588,17 @@ export const PlayerApp: React.FC = () => {
       </main>
 
       {/* Floating Bottom Action Bar (Permission-gated Player Action) */}
-      <footer className="fixed bottom-0 inset-x-0 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800 p-4 z-40">
-        <div className="max-w-md mx-auto flex items-center gap-3">
+      <footer className="fixed bottom-0 inset-x-0 path-strip border-t-[3px] border-ink-900 p-3 pb-4 z-40">
+        <div className="max-w-md mx-auto">
           {pendingDrawCount > 0 ? (
-            <button
-              onClick={handleDraw}
-              className="flex-1 py-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 active:from-indigo-700 active:to-indigo-600 text-white font-extrabold text-base rounded-2xl shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 transform active:scale-[0.98] transition-all animate-bounce-subtle"
-            >
-              <Sparkles className="w-5 h-5 text-amber-300" />
-              <span>Draw Card {pendingDrawCount > 1 ? `(×${pendingDrawCount})` : ''}</span>
+            <button onClick={handleDraw} className="btn-cyan w-full !py-4 text-lg animate-bob">
+              <Token tone="gold" size="sm" label="+" className="!ring-2" />
+              <span>Draw a card{pendingDrawCount > 1 ? ` ×${pendingDrawCount}` : ''}</span>
             </button>
           ) : (
-            <div className="flex-1 py-3.5 px-4 bg-slate-950/60 border border-slate-800/80 rounded-2xl text-center flex items-center justify-center gap-2 text-slate-500 text-xs font-semibold">
-              <span className="w-2 h-2 rounded-full bg-slate-600 animate-pulse" />
-              <span>Waiting for host window...</span>
+            <div className="slab w-full py-3.5 px-4 text-center flex items-center justify-center gap-2 font-display font-bold text-sm text-ink-500">
+              <span className="w-2.5 h-2.5 rounded-full bg-pip-gold border-2 border-ink-900 animate-pulse" />
+              <span>Waiting for your host…</span>
             </div>
           )}
         </div>
@@ -601,39 +606,34 @@ export const PlayerApp: React.FC = () => {
 
       {/* Rejoin Code Modal */}
       {showCodeModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel max-w-xs w-full rounded-2xl p-6 text-center border border-slate-800 relative">
+        <div className="board-scrim">
+          <div className="panel max-w-xs w-full p-6 text-center animate-pop">
             <button
               onClick={() => setShowCodeModal(false)}
-              className="absolute top-3 right-3 text-slate-400 hover:text-white"
+              className="btn-icon !w-8 !h-8 absolute top-3 right-3"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" strokeWidth={3} />
             </button>
 
-            <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center mb-3">
-              <Key className="w-6 h-6" />
-            </div>
+            <Token tone="gold" size="lg" icon={Key} className="mx-auto mb-3" />
 
-            <h3 className="text-base font-bold text-slate-100 mb-1">Your Rejoin Code</h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Use this code to restore your hand on another device if your battery dies.
+            <h3 className="font-display text-lg font-extrabold text-ink-800 mb-1">Your rejoin code</h3>
+            <p className="text-xs font-semibold text-ink-500 mb-4">
+              Keep this. It restores your hand on any device if your battery dies.
             </p>
 
-            <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 font-mono text-2xl font-black text-amber-300 tracking-wider mb-4 select-all">
+            <div className="slab p-4 mb-4 code-stamp text-2xl select-all">
               {joinedPlayer.player_code}
             </div>
 
-            <button
-              onClick={copyRejoinCode}
-              className="w-full py-2.5 mb-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors"
-            >
+            <button onClick={copyRejoinCode} className="btn-paper w-full !py-2.5 !text-xs mb-2">
               {copied ? (
                 <>
-                  <CheckCircle className="w-4 h-4 text-emerald-400" /> Copied!
+                  <CheckCircle className="w-4 h-4 text-pip-leaf" strokeWidth={2.75} /> Copied!
                 </>
               ) : (
                 <>
-                  <Copy className="w-4 h-4" /> Copy Rejoin Code
+                  <Copy className="w-4 h-4" strokeWidth={2.75} /> Copy code
                 </>
               )}
             </button>
@@ -643,9 +643,9 @@ export const PlayerApp: React.FC = () => {
                 setShowCodeModal(false);
                 handleLeaveRoom();
               }}
-              className="w-full py-2 text-rose-400 hover:text-rose-300 text-xs font-semibold hover:underline"
+              className="w-full py-2 font-display font-bold text-xs text-crimson-600 hover:text-crimson-800 inline-flex items-center justify-center gap-1.5"
             >
-              Leave / Switch Room
+              <LogOut className="w-3.5 h-3.5" strokeWidth={2.75} /> Leave this room
             </button>
           </div>
         </div>
@@ -653,13 +653,16 @@ export const PlayerApp: React.FC = () => {
 
       {/* Card Zoom Modal */}
       {zoomedCard && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="relative max-w-sm w-full flex flex-col items-center">
+        <div className="board-scrim" onClick={() => setZoomedCard(null)}>
+          <div
+            className="relative max-w-sm w-full flex flex-col items-center animate-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={() => setZoomedCard(null)}
-              className="absolute -top-10 right-0 text-slate-300 hover:text-white flex items-center gap-1 text-xs font-semibold"
+              className="btn-paper !py-1.5 !px-3 !text-xs absolute -top-12 right-0"
             >
-              Close <X className="w-5 h-5" />
+              Close <X className="w-4 h-4" strokeWidth={3} />
             </button>
             <CardView
               title={zoomedCard.title}
@@ -673,27 +676,20 @@ export const PlayerApp: React.FC = () => {
 
       {/* Discard Confirmation Modal */}
       {cardToDiscard && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel max-w-xs w-full rounded-2xl p-6 text-center border border-slate-800">
-            <div className="w-12 h-12 mx-auto rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center mb-3">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-100 mb-1">Confirm Discard</h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Are you sure you want to discard <strong className="text-slate-200">{cardToDiscard.title}</strong>? Discarded cards cannot be self-recovered.
+        <div className="board-scrim">
+          <div className="panel max-w-xs w-full p-6 text-center animate-pop">
+            <Token tone="red" size="lg" icon={Trash2} className="mx-auto mb-3" />
+            <h3 className="font-display text-lg font-extrabold text-ink-800 mb-1">Discard this card?</h3>
+            <p className="text-xs font-semibold text-ink-500 mb-5">
+              <strong className="text-ink-800">{cardToDiscard.title}</strong> leaves your hand for good —
+              only your host can put it back.
             </p>
             <div className="flex gap-2">
-              <button
-                onClick={() => setCardToDiscard(null)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl"
-              >
-                Cancel
+              <button onClick={() => setCardToDiscard(null)} className="btn-paper flex-1 !py-2.5 !text-xs">
+                Keep it
               </button>
-              <button
-                onClick={confirmDiscard}
-                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-rose-600/30"
-              >
-                Discard
+              <button onClick={confirmDiscard} className="btn-danger flex-1 !py-2.5 !text-xs">
+                <Minus className="w-3.5 h-3.5" strokeWidth={3} /> Discard
               </button>
             </div>
           </div>

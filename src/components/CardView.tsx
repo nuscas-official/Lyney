@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, RefreshCw, Sparkles, ZoomIn } from 'lucide-react';
+import { AlertCircle, RefreshCw, FlaskConical, ZoomIn, Trash2 } from 'lucide-react';
 import { getPublicStorageUrl } from '../lib/supabase';
+import { Token } from './BoardBits';
 
 interface CardViewProps {
   title: string;
@@ -46,87 +47,89 @@ export const CardView: React.FC<CardViewProps> = ({
   }, [loadState, retryCount]);
 
   return (
+    /* The card is a pinned polaroid: crimson frame, white mat, title printed
+       on the bottom lip the way the board's photo cut-outs read. */
     <div
-      className={`relative group aspect-[3/4] w-full max-w-[320px] rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 bg-slate-900 flex flex-col justify-between select-none transition-all duration-300 transform hover:-translate-y-1 hover:shadow-indigo-500/10 ${className}`}
+      className={`frame group w-full max-w-[320px] flex flex-col select-none
+                  transition-transform duration-200 hover:-translate-y-1.5 hover:rotate-[-1deg] ${className}`}
     >
-      {/* Source Badge / Auto-drawn Badge */}
-      {source === 'grant' && (
-        <div className="absolute top-2 left-2 z-20 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/90 text-amber-950 backdrop-blur-md shadow-md flex items-center gap-1">
-          <Sparkles className="w-3 h-3" /> Host Granted
-        </div>
-      )}
-      {isNew && source === 'draw' && (
-        <div className="absolute top-2 left-2 z-20 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/90 text-white backdrop-blur-md shadow-md">
-          New Card
-        </div>
-      )}
-
-      {/* Card Image or Degraded State */}
-      {loadState !== 'error' ? (
-        <div className="relative w-full h-full">
-          {loadState === 'loading' && (
-            <div className="absolute inset-0 bg-slate-800 animate-pulse flex items-center justify-center text-slate-500 text-xs font-medium">
-              Loading artwork...
-            </div>
-          )}
-          <img
-            src={imageUrl}
-            alt={title}
-            onLoad={() => setLoadState('loaded')}
-            onError={() => setLoadState('error')}
-            className={`w-full h-full object-cover transition-opacity duration-300 ${
-              loadState === 'loaded' ? 'opacity-100' : 'opacity-0'
-            }`}
+      <div className="relative aspect-[3/4] w-full rounded-[0.7rem] overflow-hidden bg-parchment-100">
+        {/* Source token, sitting on the frame like a board pickup */}
+        {source === 'grant' && (
+          <Token
+            tone="leaf"
+            size="sm"
+            icon={FlaskConical}
+            title="Granted by host"
+            className="absolute top-2 left-2 z-20"
           />
-        </div>
-      ) : (
-        /* Mandatory Degraded Fallback State */
-        <div className="w-full h-full p-4 bg-gradient-to-b from-slate-900 via-slate-850 to-slate-950 flex flex-col justify-between items-center text-center border-2 border-dashed border-amber-500/40 rounded-xl">
-          <div className="flex items-center gap-1.5 text-amber-400 text-xs font-bold tracking-wider uppercase mt-2">
-            <AlertCircle className="w-4 h-4" /> Card Text Fallback
+        )}
+        {isNew && source === 'draw' && (
+          <Token tone="cyan" size="sm" label="NEW" title="Just drawn" className="absolute top-2 left-2 z-20 !text-[9px]" />
+        )}
+
+        {/* Card Image or Degraded State */}
+        {loadState !== 'error' ? (
+          <>
+            {loadState === 'loading' && (
+              <div className="absolute inset-0 bg-parchment-200 animate-pulse flex items-center justify-center font-display font-bold text-ink-500 text-xs">
+                Loading artwork…
+              </div>
+            )}
+            <img
+              src={imageUrl}
+              alt={title}
+              onLoad={() => setLoadState('loaded')}
+              onError={() => setLoadState('error')}
+              className={`w-full h-full object-cover transition-opacity duration-300 ${
+                loadState === 'loaded' ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+          </>
+        ) : (
+          /* Mandatory Degraded Fallback State — a hand-written replacement tile */
+          <div className="w-full h-full p-4 bg-parchment-100 flex flex-col justify-between items-center text-center">
+            <div className="flex items-center gap-1.5 font-display font-bold text-xs uppercase tracking-wide text-crimson-600">
+              <AlertCircle className="w-4 h-4" strokeWidth={2.75} /> Text Fallback
+            </div>
+
+            <div className="my-auto px-1">
+              <h3 className="font-display text-xl font-extrabold text-ink-800 leading-tight mb-1.5">
+                {title}
+              </h3>
+              <p className="text-[11px] font-semibold text-ink-500">
+                Artwork didn't load — the title stands in so play can continue.
+              </p>
+            </div>
+
+            <button onClick={handleRetry} className="btn-paper w-full !py-2 !text-xs">
+              <RefreshCw className="w-3.5 h-3.5" strokeWidth={2.75} /> Tap to retry
+            </button>
           </div>
-          
-          <div className="my-auto px-2">
-            <h3 className="text-xl font-extrabold text-slate-100 leading-tight mb-2">
-              {title}
-            </h3>
-            <p className="text-xs text-slate-400">
-              Image payload unavailable. Title fallback displayed for gameplay continuity.
-            </p>
+        )}
+
+        {/* Interactive Overlays */}
+        <div className="absolute inset-0 bg-ink-900/55 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 flex flex-col justify-between p-2.5 pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto">
+          <div className="flex justify-end">
+            {onZoom && (
+              <button onClick={onZoom} className="btn-icon !w-8 !h-8" title="Zoom card">
+                <ZoomIn className="w-4 h-4" strokeWidth={2.75} />
+              </button>
+            )}
           </div>
 
-          <button
-            onClick={handleRetry}
-            className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-amber-300 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 border border-amber-500/30 transition-colors"
-          >
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Tap to Retry Image
-          </button>
-        </div>
-      )}
-
-      {/* Interactive Overlays */}
-      <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-between p-3 pointer-events-none group-hover:pointer-events-auto">
-        <div className="flex justify-end">
-          {onZoom && (
-            <button
-              onClick={onZoom}
-              className="p-2 rounded-lg bg-slate-800/90 text-slate-200 hover:bg-slate-700 hover:text-white transition-colors"
-              title="Zoom Card"
-            >
-              <ZoomIn className="w-4 h-4" />
+          {canDiscard && onDiscard && (
+            <button onClick={onDiscard} className="btn-danger w-full !py-2 !text-xs">
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={2.75} /> Discard
             </button>
           )}
         </div>
-
-        {canDiscard && onDiscard && (
-          <button
-            onClick={onDiscard}
-            className="w-full py-2 bg-rose-600/90 hover:bg-rose-500 text-white font-semibold text-xs rounded-lg shadow-lg backdrop-blur-md transition-colors"
-          >
-            Discard Card
-          </button>
-        )}
       </div>
+
+      {/* Printed title lip */}
+      <p className="px-1.5 pt-2 pb-0.5 font-display font-extrabold text-sm text-ink-800 text-center leading-tight truncate">
+        {title}
+      </p>
     </div>
   );
 };

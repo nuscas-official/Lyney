@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Board field -->
+  <rect width="64" height="64" rx="14" fill="#d2ecbe"/>
+  <!-- Winding cream path -->
+  <path d="M8 54 Q30 46 26 30 T50 10" stroke="#fbf0c8" stroke-width="11"
+        stroke-linecap="round" fill="none"/>
+  <!-- Card in its crimson frame, tilted like a pinned polaroid -->
+  <g transform="rotate(-8 32 34)">
+    <rect x="19" y="19" width="26" height="32" rx="5"
+          fill="#fffcf2" stroke="#9e2436" stroke-width="4.5"/>
+  </g>
+  <!-- Pickup token -->
+  <circle cx="47" cy="17" r="8.5" fill="#33c6e8" stroke="#fff" stroke-width="3"/>
+</svg>

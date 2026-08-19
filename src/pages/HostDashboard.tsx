@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Shield, Users, Sparkles, Layers, RotateCcw, Plus, Trash2, 
-  Eye, Edit3, UserX, UserCheck, RefreshCw, Upload, CheckCircle, 
-  AlertTriangle, Sliders, X, Search
+import {
+  Shield, Users, Layers, RotateCcw, Plus, Trash2,
+  UserX, UserCheck, RefreshCw, Sliders, X,
 } from 'lucide-react';
 import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
-import { CardView } from '../components/CardView';
-import { Card, CommandLogEntry } from '../types/database';
+import { Token, Standee, PaperChip, BoardHeading } from '../components/BoardBits';
+import { Card } from '../types/database';
 
 // Sample mock data for standalone local demo mode
 const INITIAL_DEMO_CARDS: Card[] = [
@@ -497,12 +496,15 @@ export const HostDashboard: React.FC = () => {
     setPlayers([]);
   };
 
+
   // Session restore is still in flight: hold the login screen back so a refresh
   // does not flash the PIN form at an already-authenticated host.
   if (isRestoringSession) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <RefreshCw className="w-6 h-6 text-amber-400 animate-spin" />
+      <div className="flex-1 flex items-center justify-center">
+        <div className="panel p-6">
+          <RefreshCw className="w-6 h-6 text-crimson-500 animate-spin" strokeWidth={2.75} />
+        </div>
       </div>
     );
   }
@@ -515,88 +517,82 @@ export const HostDashboard: React.FC = () => {
   // 1. HOST LOGIN SCREEN
   if (!isHostAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="text-center mb-6">
-          <div className="inline-flex p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl mb-3">
-            <Shield className="w-8 h-8 text-amber-400" />
-          </div>
-          <h1 className="text-3xl font-black text-white font-['Outfit']">Host Dashboard</h1>
-          <p className="text-xs text-slate-400">Lyney Event Management Console</p>
+      <div className="flex-1 flex flex-col items-center justify-center p-4 py-10">
+        <div className="text-center mb-7">
+          <Token tone="gold" size="lg" icon={Shield} className="mx-auto mb-3" />
+          <h1 className="board-sign text-4xl leading-none -rotate-1 mb-1.5">Host Console</h1>
+          <p className="font-display font-bold text-xs uppercase tracking-[0.18em] text-board-800">
+            Run the table
+          </p>
         </div>
 
-        <div className="w-full max-w-sm glass-panel p-6 sm:p-8 rounded-2xl border border-slate-800">
-          <div className="flex bg-slate-900 p-1 rounded-xl mb-6 text-xs font-semibold border border-slate-800">
+        <div className="w-full max-w-sm panel taped p-6 sm:p-7 pt-8">
+          {/* Access / Create toggle, built as two board tiles */}
+          <div className="flex gap-1 p-1 mb-6 rounded-2xl bg-parchment-200 border-[2.5px] border-ink-900">
             <button
               type="button"
               onClick={() => setIsCreatingNewRoom(false)}
-              className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
-                !isCreatingNewRoom ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'
+              className={`flex-1 py-2 rounded-xl font-display font-bold text-xs transition-colors ${
+                !isCreatingNewRoom ? 'bg-pip-gold text-ink-900 shadow-sticker-sm' : 'text-ink-500'
               }`}
             >
-              Access Room
+              Access room
             </button>
             <button
               type="button"
               onClick={() => setIsCreatingNewRoom(true)}
-              className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
-                isCreatingNewRoom ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'
+              className={`flex-1 py-2 rounded-xl font-display font-bold text-xs transition-colors ${
+                isCreatingNewRoom ? 'bg-pip-gold text-ink-900 shadow-sticker-sm' : 'text-ink-500'
               }`}
             >
-              Create Room
+              Create room
             </button>
           </div>
 
           <form onSubmit={handleHostLogin} className="space-y-4">
             {isCreatingNewRoom ? (
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
-                  Room Name
-                </label>
+                <label className="field-label">Room name</label>
                 <input
                   type="text"
                   value={roomLabel}
                   onChange={(e) => setRoomLabel(e.target.value)}
                   placeholder="e.g. Table 3"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-amber-500"
+                  className="field"
                   required
                 />
-                <p className="text-[11px] text-slate-500 mt-1.5">
-                  Your join code is generated when the room is created.
+                <p className="text-[11px] font-semibold text-ink-400 mt-1.5">
+                  A join code is printed for you once the room exists.
                 </p>
               </div>
             ) : (
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
-                  Join Code
-                </label>
+                <label className="field-label">Join code</label>
                 <input
                   type="text"
                   value={roomCode}
                   onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                   placeholder="e.g. K7M4QP"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono uppercase focus:outline-none focus:border-amber-500"
+                  className="field font-mono tracking-[0.15em] uppercase"
                   required
                 />
               </div>
             )}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
-                {isCreatingNewRoom ? 'Set Host PIN' : 'Host PIN'}
+              <label className="field-label">
+                {isCreatingNewRoom ? 'Set host PIN' : 'Host PIN'}
               </label>
               <input
                 type="password"
                 value={hostPin}
                 onChange={(e) => setHostPin(e.target.value)}
                 placeholder="e.g. 1234"
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono focus:outline-none focus:border-amber-500"
+                className="field font-mono tracking-[0.2em]"
                 required
               />
             </div>
-            <button
-              type="submit"
-              className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-colors"
-            >
-              {isCreatingNewRoom ? 'Create & Launch Room' : 'Access Dashboard'}
+            <button type="submit" className="btn-crimson w-full !py-4 text-base">
+              {isCreatingNewRoom ? 'Create & launch' : 'Open console'}
             </button>
           </form>
         </div>
@@ -606,81 +602,79 @@ export const HostDashboard: React.FC = () => {
 
   // 2. MAIN HOST DASHBOARD INTERFACE
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-24">
-      {/* Top Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 sm:px-6 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-bold">
-            <Shield className="w-5 h-5" />
+    <div className="flex-1 flex flex-col pb-10">
+      {/* Top Header — the cream path running across the top of the board */}
+      <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 sm:px-6 py-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Token tone="gold" size="md" icon={Shield} />
+            <div className="min-w-0">
+              <h1 className="font-display text-lg font-extrabold text-ink-800 leading-tight truncate">
+                {roomLabel || 'Host Console'}
+              </h1>
+              <p className="text-xs font-bold text-ink-500">
+                {activePlayers.length} {activePlayers.length === 1 ? 'player' : 'players'} at the table
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-base font-bold text-white flex items-center gap-2">
-              {roomLabel || 'Host Console'}
-              <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
-                Join code: {roomCode}
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">{activePlayers.length} Active Players</p>
-          </div>
+
+          <span className="shrink-0 chip bg-white code-stamp !text-sm">{roomCode}</span>
         </div>
 
-        {/* Navigation Tabs & Reset */}
-        <div className="flex items-center gap-2">
-          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-semibold">
+        {/* Navigation Tabs & Actions */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-1 p-1 rounded-2xl bg-white border-[2.5px] border-ink-900">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                activeTab === 'overview' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-xl font-display font-bold text-xs transition-colors ${
+                activeTab === 'overview' ? 'bg-pip-cyan text-ink-900 shadow-sticker-sm' : 'text-ink-500 hover:text-ink-800'
               }`}
             >
-              Room View
+              Room
             </button>
             <button
               onClick={() => setActiveTab('catalog')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                activeTab === 'catalog' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-xl font-display font-bold text-xs transition-colors ${
+                activeTab === 'catalog' ? 'bg-pip-cyan text-ink-900 shadow-sticker-sm' : 'text-ink-500 hover:text-ink-800'
               }`}
             >
-              Card Catalog ({cards.length})
+              Catalog ({cards.length})
             </button>
           </div>
 
-          <button
-            onClick={handleManualRefresh}
-            disabled={isRefreshing}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 text-slate-400 hover:text-indigo-300 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 disabled:opacity-50"
-            title="Refresh Room Data"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} /> Refresh
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              className="btn-icon"
+              title="Refresh room data"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} strokeWidth={2.75} />
+            </button>
 
-          <button
-            onClick={handleResetRoom}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-rose-950/80 border border-slate-800 hover:border-rose-500/50 text-slate-400 hover:text-rose-300 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5"
-            title="Reset Session Data"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Reset Session
-          </button>
+            <button
+              onClick={handleResetRoom}
+              className="btn-icon hover:!bg-pip-red hover:!text-white"
+              title="Reset session data"
+            >
+              <Trash2 className="w-4 h-4" strokeWidth={2.75} />
+            </button>
 
-          <button
-            onClick={handleSignOut}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white text-xs font-semibold rounded-xl transition-colors"
-            title="Sign out of host console"
-          >
-            Sign Out
-          </button>
+            <button onClick={handleSignOut} className="btn-paper !py-2 !px-3 !text-xs" title="Sign out">
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Persistent Undo Banner */}
       {lastActionText && (
-        <div className="bg-indigo-950/80 border-b border-indigo-500/30 px-4 py-2 flex items-center justify-between text-xs font-medium">
-          <span className="text-indigo-200 truncate">Last Action: {lastActionText}</span>
-          <button
-            onClick={handleUndo}
-            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 shrink-0 ml-2"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Undo
+        <div className="bg-pip-violet border-b-[3px] border-ink-900 px-4 py-2 flex items-center justify-between gap-3">
+          <span className="font-display font-bold text-xs text-white truncate">
+            Last move: {lastActionText}
+          </span>
+          <button onClick={handleUndo} className="btn-paper !py-1.5 !px-3 !text-xs shrink-0">
+            <RotateCcw className="w-3.5 h-3.5" strokeWidth={2.75} /> Undo
           </button>
         </div>
       )}
@@ -691,14 +685,17 @@ export const HostDashboard: React.FC = () => {
         {activeTab === 'overview' && (
           <>
             {/* Primary Permission Control Bar */}
-            <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-amber-400" /> Permission Controller
-                </h2>
+            <div className="panel p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3 border-b-[2.5px] border-dashed border-ink-900/25 pb-3">
+                <BoardHeading
+                  icon={Sliders}
+                  tone="crimson"
+                  title="Move controller"
+                  subtitle="Open a window and let the table act"
+                />
                 {windowOpen && (
-                  <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-semibold animate-pulse border border-amber-500/40">
-                    Window Open
+                  <span className="chip bg-pip-gold shrink-0 animate-wiggle">
+                    <span className="font-display font-extrabold">!</span> Window open
                   </span>
                 )}
               </div>
@@ -706,25 +703,25 @@ export const HostDashboard: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 {/* Scope selector */}
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Scope</label>
+                  <label className="field-label">Scope</label>
                   <select
                     value={permScope}
                     onChange={(e) => setPermScope(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
+                    className="field !py-2.5 !text-sm"
                   >
-                    <option value="room">Whole Room ({activePlayers.length})</option>
-                    <option value="player">Single Player</option>
+                    <option value="room">Whole room ({activePlayers.length})</option>
+                    <option value="player">Single player</option>
                   </select>
                 </div>
 
                 {/* Scope specifics */}
                 {permScope === 'player' && (
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Select Player</label>
+                    <label className="field-label">Player</label>
                     <select
                       value={targetPlayerId}
                       onChange={(e) => setTargetPlayerId(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
+                      className="field !py-2.5 !text-sm"
                     >
                       {activePlayers.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
@@ -735,46 +732,49 @@ export const HostDashboard: React.FC = () => {
 
                 {/* Action Type */}
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Action</label>
+                  <label className="field-label">Action</label>
                   <select
                     value={permAction}
                     onChange={(e) => setPermAction(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
+                    className="field !py-2.5 !text-sm"
                   >
-                    <option value="draw">DRAW CARD</option>
-                    <option value="discard">DISCARD CARD</option>
+                    <option value="draw">Draw a card</option>
+                    <option value="discard">Discard a card</option>
                   </select>
                 </div>
 
                 {/* Quantity */}
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Quantity</label>
+                  <label className="field-label">How many</label>
                   <input
                     type="number"
                     min="1"
                     max="5"
                     value={permCount}
                     onChange={(e) => setPermCount(parseInt(e.target.value) || 1)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
+                    className="field !py-2.5 !text-sm"
                   />
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
                 <button
                   onClick={handleIssuePermission}
-                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-colors"
+                  className={`flex-1 !py-4 ${permAction === 'draw' ? 'btn-cyan' : 'btn-danger'}`}
                 >
-                  <Sparkles className="w-4 h-4" /> Issue Window ({permAction.toUpperCase()} ×{permCount})
+                  <Token
+                    tone={permAction === 'draw' ? 'gold' : 'paper'}
+                    size="xs"
+                    label={permAction === 'draw' ? '+' : '−'}
+                    className="!ring-2"
+                  />
+                  Open {permAction} window ×{permCount}
                 </button>
 
                 {windowOpen && (
-                  <button
-                    onClick={handleCloseWindow}
-                    className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-rose-300 font-bold text-xs rounded-xl border border-rose-500/30 transition-colors"
-                  >
-                    Close Window & Auto-Draw
+                  <button onClick={handleCloseWindow} className="btn-paper !py-4 sm:!px-5 !text-sm">
+                    Close window & auto-draw
                   </button>
                 )}
               </div>
@@ -783,54 +783,52 @@ export const HostDashboard: React.FC = () => {
             {/* Player Cards Grid */}
             <div className="space-y-4">
               {players.length === 0 ? (
-                <div className="glass-panel p-8 rounded-2xl text-center border border-slate-800">
-                  <Users className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                  <h3 className="text-sm font-bold text-slate-200">No Players in Room Yet</h3>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-                    Players who enter join code <strong className="text-indigo-300 font-mono">{roomCode}</strong> on their phones will appear here live.
+                <div className="path-dashed p-10 text-center">
+                  <Token tone="paper" size="lg" icon={Users} className="mx-auto mb-3 opacity-70" />
+                  <h3 className="font-display text-base font-extrabold text-ink-700">Nobody on the board yet</h3>
+                  <p className="text-xs font-semibold text-ink-500 max-w-xs mx-auto mt-1">
+                    Players who enter join code{' '}
+                    <strong className="code-stamp">{roomCode}</strong> on their phones show up here live.
                   </p>
                 </div>
               ) : (
-                <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
-                  <div className="px-4 sm:px-5 py-3.5 bg-slate-900/80 flex items-center justify-between border-b border-slate-800/80">
-                    <div className="flex items-center gap-3">
-                      <h3 className="text-sm font-bold text-white">Players</h3>
-                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[11px]">
-                        {activePlayers.length} active
-                      </span>
+                <div className="panel overflow-hidden">
+                  <div className="px-4 sm:px-5 py-3.5 path-strip flex items-center justify-between gap-3 border-b-[3px] border-ink-900">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-display text-base font-extrabold text-ink-800">Players</h3>
+                      <PaperChip tone="paper">{activePlayers.length} active</PaperChip>
                     </div>
-                    <div className="text-xs font-semibold text-slate-400">
-                      Progress: <strong className="text-amber-300">{actedCount} / {activePlayers.length}</strong> drawn
-                    </div>
+                    <PaperChip tone={actedCount === activePlayers.length ? 'leaf' : 'gold'}>
+                      {actedCount} / {activePlayers.length} drawn
+                    </PaperChip>
                   </div>
 
                   <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {players.map((player) => (
                       <div
                         key={player.id}
-                        className={`p-4 rounded-xl border transition-all ${
-                          player.active
-                            ? 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700'
-                            : 'bg-slate-950/40 border-slate-900 opacity-50 grayscale'
+                        className={`slab p-4 transition-transform hover:-translate-y-0.5 ${
+                          player.active ? 'shadow-sticker-sm' : 'opacity-55 grayscale'
                         }`}
                       >
                         {/* Player Row Header */}
-                        <div className="flex items-center justify-between mb-3">
-                          <div>
-                            <h4 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                              {player.name}
-                              {!player.active && (
-                                <span className="text-[10px] font-semibold text-rose-400 bg-rose-950 px-1.5 py-0.5 rounded border border-rose-800">
-                                  Removed
-                                </span>
-                              )}
-                            </h4>
-                            <p className="text-[11px] font-mono text-amber-400/90">
-                              Code: {player.player_code}
-                            </p>
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Standee name={player.name} size="sm" muted={!player.active} />
+                            <div className="min-w-0">
+                              <h4 className="font-display text-sm font-extrabold text-ink-800 truncate flex items-center gap-1.5">
+                                {player.name}
+                                {!player.active && (
+                                  <span className="chip !px-1.5 !py-0 bg-pip-red text-white !text-[10px]">
+                                    Removed
+                                  </span>
+                                )}
+                              </h4>
+                              <p className="text-[11px] code-stamp">{player.player_code}</p>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 shrink-0">
                             {player.active ? (
                               <>
                                 <button
@@ -838,26 +836,26 @@ export const HostDashboard: React.FC = () => {
                                     setSelectedPlayer(player);
                                     setShowGrantModal(true);
                                   }}
-                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-amber-300"
-                                  title="Grant Specific Card"
+                                  className="btn-icon !w-8 !h-8 hover:!bg-pip-leaf"
+                                  title="Grant a specific card"
                                 >
-                                  <Plus className="w-3.5 h-3.5" />
+                                  <Plus className="w-4 h-4" strokeWidth={3} />
                                 </button>
                                 <button
                                   onClick={() => handleRemovePlayer(player.id)}
-                                  className="p-1.5 bg-slate-800 hover:bg-rose-950 rounded-lg text-slate-400 hover:text-rose-400"
-                                  title="Remove Player"
+                                  className="btn-icon !w-8 !h-8 hover:!bg-pip-red hover:!text-white"
+                                  title="Remove player"
                                 >
-                                  <UserX className="w-3.5 h-3.5" />
+                                  <UserX className="w-4 h-4" strokeWidth={2.75} />
                                 </button>
                               </>
                             ) : (
                               <button
                                 onClick={() => handleRestorePlayer(player.id)}
-                                className="p-1.5 bg-slate-800 hover:bg-emerald-950 rounded-lg text-emerald-400"
-                                title="Restore Player"
+                                className="btn-icon !w-8 !h-8 hover:!bg-pip-leaf"
+                                title="Restore player"
                               >
-                                <UserCheck className="w-3.5 h-3.5" />
+                                <UserCheck className="w-4 h-4" strokeWidth={2.75} />
                               </button>
                             )}
                           </div>
@@ -865,29 +863,29 @@ export const HostDashboard: React.FC = () => {
 
                         {/* Player Hand Thumbnails */}
                         <div className="space-y-1.5">
-                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                          <p className="font-display font-bold text-[11px] uppercase tracking-wide text-ink-400">
                             Hand ({player.hand.length})
                           </p>
                           {player.hand.length === 0 ? (
-                            <p className="text-xs text-slate-600 italic">No cards held</p>
+                            <p className="text-xs font-semibold text-ink-400 italic">Empty</p>
                           ) : (
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-1.5">
                               {player.hand.map((h) => (
-                                <div
+                                <span
                                   key={h.held_card_id}
-                                  className="relative group px-2 py-1 bg-slate-850 rounded-lg border border-slate-700/60 text-xs font-medium text-slate-300 flex items-center gap-1.5"
+                                  className={`chip ${h.source === 'grant' ? 'bg-pip-leaf' : 'bg-white'}`}
                                 >
-                                  <span className="truncate max-w-[100px]">{h.title}</span>
+                                  <span className="truncate max-w-[110px]">{h.title}</span>
                                   {player.active && (
                                     <button
                                       onClick={() => handleRevokeCard(player.id, h.held_card_id)}
-                                      className="text-slate-500 hover:text-rose-400"
-                                      title="Revoke Card"
+                                      className="text-ink-500 hover:text-pip-red"
+                                      title="Revoke card"
                                     >
-                                      <X className="w-3 h-3" />
+                                      <X className="w-3 h-3" strokeWidth={3} />
                                     </button>
                                   )}
-                                </div>
+                                </span>
                               ))}
                             </div>
                           )}
@@ -904,62 +902,68 @@ export const HostDashboard: React.FC = () => {
         {/* CATALOG & WEIGHTS TAB */}
         {activeTab === 'catalog' && (
           <div className="space-y-6">
-            <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-white mb-1">Card Catalog</h2>
-                <p className="text-xs text-slate-400">
-                  Manage active cards and adjust draw weights for random distribution.
-                </p>
-              </div>
-              <button
-                onClick={fetchRoomData}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl flex items-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" /> Refresh Catalog
+            <div className="panel p-5 flex flex-wrap items-center justify-between gap-3">
+              <BoardHeading
+                icon={Layers}
+                tone="violet"
+                title="Card catalog"
+                subtitle="Which cards are in the deck, and how often they turn up"
+              />
+              <button onClick={fetchRoomData} className="btn-paper !py-2.5 !px-4 !text-xs">
+                <RefreshCw className="w-4 h-4" strokeWidth={2.75} /> Refresh
               </button>
             </div>
 
             {/* Card Weights Table */}
-            <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-900 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-4">Card Title</th>
-                    <th className="py-3 px-4">Image Path</th>
-                    <th className="py-3 px-4 text-center">Draw Weight</th>
-                    <th className="py-3 px-4 text-right">Probability</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 text-xs">
-                  {cards.map((card) => {
-                    const prob = totalWeight > 0 ? ((card.weight / totalWeight) * 100).toFixed(1) : '0.0';
-                    return (
-                      <tr key={card.id} className="hover:bg-slate-900/50">
-                        <td className="py-3 px-4 font-bold text-slate-100">{card.title}</td>
-                        <td className="py-3 px-4 font-mono text-slate-400 text-[11px]">{card.image_path}</td>
-                        <td className="py-3 px-4 text-center">
-                          <input
-                            type="number"
-                            min="1"
-                            max="100"
-                            value={card.weight}
-                            onChange={(e) => {
-                              const w = parseInt(e.target.value) || 1;
-                              setCards((prev) =>
-                                prev.map((c) => (c.id === card.id ? { ...c, weight: w } : c))
-                              );
-                            }}
-                            className="w-16 px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-center font-bold text-amber-300 focus:outline-none"
-                          />
-                        </td>
-                        <td className="py-3 px-4 text-right font-mono font-bold text-indigo-300">
-                          {prob}%
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="panel overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[520px]">
+                  <thead>
+                    <tr className="path-strip border-b-[3px] border-ink-900 font-display text-[11px] font-extrabold text-ink-700 uppercase tracking-wide">
+                      <th className="py-3 px-4">Card</th>
+                      <th className="py-3 px-4">Artwork path</th>
+                      <th className="py-3 px-4 text-center">Weight</th>
+                      <th className="py-3 px-4 text-right">Odds</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs">
+                    {cards.map((card) => {
+                      const prob = totalWeight > 0 ? ((card.weight / totalWeight) * 100).toFixed(1) : '0.0';
+                      return (
+                        <tr
+                          key={card.id}
+                          className="border-b-2 border-dashed border-ink-900/15 last:border-0 hover:bg-parchment-100"
+                        >
+                          <td className="py-3 px-4 font-display font-extrabold text-sm text-ink-800">
+                            {card.title}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[11px] text-ink-400 truncate max-w-[220px]">
+                            {card.image_path}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              value={card.weight}
+                              onChange={(e) => {
+                                const w = parseInt(e.target.value) || 1;
+                                setCards((prev) =>
+                                  prev.map((c) => (c.id === card.id ? { ...c, weight: w } : c))
+                                );
+                              }}
+                              className="field !w-16 !px-2 !py-1 !text-center font-display font-extrabold"
+                            />
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="chip bg-pip-cyan font-mono">{prob}%</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -967,47 +971,51 @@ export const HostDashboard: React.FC = () => {
 
       {/* Direct Grant Card Modal */}
       {showGrantModal && selectedPlayer && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel max-w-sm w-full rounded-2xl p-6 border border-slate-800 relative">
+        <div className="board-scrim">
+          <div className="panel max-w-sm w-full p-6 animate-pop">
             <button
               onClick={() => setShowGrantModal(false)}
-              className="absolute top-3 right-3 text-slate-400 hover:text-white"
+              className="btn-icon !w-8 !h-8 absolute top-3 right-3"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" strokeWidth={3} />
             </button>
 
-            <h3 className="text-base font-bold text-white mb-1">Grant Card to {selectedPlayer.name}</h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Select a card to add directly to this player's hand.
-            </p>
+            <div className="flex items-center gap-3 mb-4">
+              <Token tone="leaf" size="md" icon={Plus} />
+              <div className="min-w-0">
+                <h3 className="font-display text-lg font-extrabold text-ink-800 leading-tight truncate">
+                  Grant a card
+                </h3>
+                <p className="text-xs font-semibold text-ink-500 truncate">
+                  Straight into {selectedPlayer.name}'s hand
+                </p>
+              </div>
+            </div>
 
-            <div className="space-y-3 mb-6">
-              <label className="block text-xs font-semibold text-slate-300 uppercase">Select Card</label>
+            <div className="mb-6">
+              <label className="field-label">Choose card</label>
               <select
                 value={selectedGrantCardId}
                 onChange={(e) => setSelectedGrantCardId(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none"
+                className="field !py-2.5 !text-sm"
               >
                 {cards.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.title} (Weight: {c.weight})
+                    {c.title} (weight {c.weight})
                   </option>
                 ))}
               </select>
             </div>
 
             <div className="flex gap-2">
-              <button
-                onClick={() => setShowGrantModal(false)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl"
-              >
+              <button onClick={() => setShowGrantModal(false)} className="btn-paper flex-1 !py-2.5 !text-xs">
                 Cancel
               </button>
               <button
                 onClick={() => handleGrantCard(selectedPlayer.id)}
-                className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20"
+                className="btn-leaf flex-1 !py-2.5 !text-xs"
               >
-                Grant Card
+                Grant card
               </button>
             </div>
           </div>

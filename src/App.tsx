@@ -33,30 +33,34 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      {/* Universal Top Switcher Bar */}
-      <nav className="bg-slate-950 border-b border-slate-900 px-4 py-1.5 flex items-center justify-between text-xs text-slate-400 z-50">
-        <div className="flex items-center gap-2 font-mono text-[11px]">
-          <span className="text-slate-500">Project:</span>
-          <strong className="text-indigo-400">Lyney Card Companion</strong>
-        </div>
+    <div className="min-h-screen flex flex-col">
+      {/* Universal Top Switcher Bar — styled as the board's dark bezel */}
+      <nav className="bg-ink-900 border-b-[3px] border-ink-900 px-3 py-2 flex items-center justify-center sm:justify-between z-50">
+        <span className="hidden sm:flex items-center gap-2 font-display font-extrabold text-parchment-200 text-sm tracking-tight">
+          <span className="token bg-crimson-500 text-parchment-50 w-6 h-6 text-xs">L</span>
+          Lyney
+        </span>
 
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 font-semibold">
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-ink-800 border-[2.5px] border-ink-700">
           <button
             onClick={() => navigateTo('play')}
-            className={`px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors ${
-              route === 'play' ? 'bg-indigo-600 text-white' : 'hover:text-slate-200'
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-display font-bold text-xs transition-colors ${
+              route === 'play'
+                ? 'bg-pip-cyan text-ink-900 shadow-sticker-sm'
+                : 'text-parchment-200/70 hover:text-parchment-100'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" /> Player View (/play)
+            <Smartphone className="w-3.5 h-3.5" strokeWidth={2.75} /> Player
           </button>
           <button
             onClick={() => navigateTo('host')}
-            className={`px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors ${
-              route === 'host' ? 'bg-amber-500 text-slate-950' : 'hover:text-slate-200'
+            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-display font-bold text-xs transition-colors ${
+              route === 'host'
+                ? 'bg-pip-gold text-ink-900 shadow-sticker-sm'
+                : 'text-parchment-200/70 hover:text-parchment-100'
             }`}
           >
-            <Shield className="w-3.5 h-3.5" /> Host Console (/host)
+            <Shield className="w-3.5 h-3.5" strokeWidth={2.75} /> Host
           </button>
         </div>
       </nav>

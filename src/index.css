@@ -2,40 +2,189 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   LYNEY — "BOARD DAY" THEME
+   Derived from the CAS members' hand-made game board:
+   sage grass tiles, a cream winding path, crimson polaroid frames,
+   and the scattered +10 / -10 / ! / potion pickup tokens.
+   ========================================================================== */
+
 @layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
-    @apply bg-slate-950 text-slate-100 antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    @apply font-sans text-ink-800 antialiased;
+    background-color: theme('colors.board.200');
+    /* The grass field: soft blooms of light over diagonal tile seams. */
+    background-image:
+      radial-gradient(ellipse 90% 55% at 50% -8%, rgba(255, 255, 255, 0.6), transparent 62%),
+      radial-gradient(ellipse 70% 55% at 105% 105%, rgba(101, 158, 65, 0.32), transparent 60%),
+      radial-gradient(ellipse 60% 45% at -5% 90%, rgba(101, 158, 65, 0.22), transparent 60%),
+      repeating-linear-gradient(114deg, rgba(255, 255, 255, 0.17) 0 2px, transparent 2px 46px),
+      repeating-linear-gradient(66deg, rgba(78, 124, 52, 0.11) 0 2px, transparent 2px 46px);
+    background-attachment: fixed;
+  }
+
+  /* Board lettering: headings carry the chunky marker weight. */
+  h1, h2, h3, h4 {
+    @apply font-display font-extrabold text-ink-800;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: theme('colors.pip.gold');
+    color: theme('colors.ink.900');
   }
 }
 
-.glass-panel {
-  @apply bg-slate-900/70 backdrop-blur-md border border-slate-800/80 shadow-xl;
+@layer components {
+
+  /* ---- Paper --------------------------------------------------------- */
+
+  /* A piece of card stock laid on the board. */
+  .panel {
+    @apply relative bg-parchment border-[3px] border-ink-900 rounded-board shadow-sticker-lg;
+  }
+
+  /* Lighter inner surface, e.g. rows nested inside a panel. */
+  .slab {
+    @apply bg-parchment-50 border-[2.5px] border-ink-900/85 rounded-2xl;
+  }
+
+  /* A stretch of the winding cream path — used behind headers/footers. */
+  .path-strip {
+    background-color: theme('colors.parchment.200');
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.55) 0 26px,
+      transparent 26px 48px
+    );
+  }
+
+  /* Photo frame: white mat inside a crimson border, exactly like the
+     building photos pinned around the board. */
+  .frame {
+    @apply relative bg-white p-1.5 border-[3px] border-crimson-600 rounded-[1.15rem] shadow-frame;
+  }
+
+  /* Tilted washi-tape corner accent for a hand-assembled feel. */
+  .taped::before {
+    content: '';
+    @apply absolute -top-2 left-1/2 w-16 h-5 -translate-x-1/2 -rotate-3 rounded-[3px] pointer-events-none;
+    background: repeating-linear-gradient(
+      45deg,
+      rgba(255, 206, 46, 0.85) 0 6px,
+      rgba(255, 226, 128, 0.85) 6px 12px
+    );
+    box-shadow: 0 1px 0 0 rgba(15, 23, 34, 0.18);
+  }
+
+  /* ---- Buttons ------------------------------------------------------- */
+
+  /* Chunky game piece: sits on a hard shadow, presses down on tap. */
+  .btn {
+    @apply relative inline-flex items-center justify-center gap-2
+           font-display font-extrabold leading-none tracking-tight
+           border-[3px] border-ink-900 rounded-2xl px-4 py-3
+           shadow-sticker transition-[transform,box-shadow,background-color] duration-100
+           select-none disabled:opacity-55 disabled:pointer-events-none;
+  }
+  .btn:active {
+    @apply translate-y-1 shadow-pressed;
+  }
+
+  .btn-crimson { @apply btn bg-crimson-500 text-parchment-50 hover:bg-crimson-400; }
+  .btn-gold    { @apply btn bg-pip-gold text-ink-900 hover:brightness-105; }
+  .btn-cyan    { @apply btn bg-pip-cyan text-ink-900 hover:brightness-105; }
+  .btn-leaf    { @apply btn bg-pip-leaf text-ink-900 hover:brightness-105; }
+  .btn-paper   { @apply btn bg-parchment-50 text-ink-700 hover:bg-parchment-100; }
+  .btn-danger  { @apply btn bg-pip-red text-white hover:brightness-110; }
+
+  /* Small square icon button, same press physics. */
+  .btn-icon {
+    @apply inline-flex items-center justify-center w-9 h-9
+           bg-parchment-50 text-ink-600 border-[2.5px] border-ink-900 rounded-xl
+           shadow-sticker-sm transition-[transform,box-shadow,background-color] duration-100
+           hover:bg-parchment-100 disabled:opacity-50;
+  }
+  .btn-icon:active {
+    @apply translate-y-[3px] shadow-pressed;
+  }
+
+  /* ---- Fields -------------------------------------------------------- */
+
+  .field {
+    @apply w-full px-4 py-3 bg-white text-ink-800 placeholder-ink-400/70
+           font-semibold border-[2.5px] border-ink-900 rounded-xl
+           shadow-sticker-sm outline-none transition-colors
+           focus:border-crimson-500 focus:bg-parchment-50;
+  }
+
+  .field-label {
+    @apply block font-display font-bold text-[0.78rem] uppercase tracking-wide text-ink-600 mb-1.5;
+  }
+
+  /* ---- Board furniture ------------------------------------------------ */
+
+  /* A pickup token: colored disc, white ring, hard shadow. */
+  .token {
+    @apply inline-flex items-center justify-center rounded-full
+           ring-[3px] ring-white shadow-token font-display font-extrabold
+           text-ink-900 shrink-0;
+  }
+
+  /* Little printed label chip. */
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
+           font-display font-bold text-xs border-[2px] border-ink-900 bg-parchment-100 text-ink-700;
+  }
+
+  /* Room / rejoin codes: stamped monospace on paper. */
+  .code-stamp {
+    @apply font-mono font-bold tracking-[0.12em] uppercase text-crimson-600;
+  }
+
+  /* Hand-lettered board sign, like "START!!!!" */
+  .board-sign {
+    @apply font-display font-extrabold text-crimson-600;
+    text-shadow: 2px 2px 0 rgba(255, 255, 255, 0.85);
+  }
+
+  /* Dashed "empty tile" drop zone that marches like a path. */
+  .path-dashed {
+    @apply rounded-board border-[3px] border-dashed border-ink-900/35 bg-parchment/60;
+  }
+
+  /* Modal backdrop: dims to the board bezel color. */
+  .board-scrim {
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4
+           bg-ink-900/70 backdrop-blur-[3px];
+  }
 }
 
-.glass-card {
-  @apply bg-slate-900/40 backdrop-blur-sm border border-slate-800/60 hover:border-slate-700/80 transition-all duration-200;
-}
-
-.gradient-text {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-400 to-indigo-400;
-}
-
-/* Custom scrollbars */
+/* Scrollbars styled as a cream path with an ink thumb. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: theme('colors.parchment.200');
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
+  background: theme('colors.ink.700');
+  border: 2px solid theme('colors.parchment.200');
   border-radius: 9999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 1);
+  background: theme('colors.crimson.600');
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
