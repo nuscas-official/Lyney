@@ -101,6 +101,7 @@
   .btn-leaf    { @apply btn bg-pip-leaf text-ink-900 hover:brightness-105; }
   .btn-paper   { @apply btn bg-parchment-50 text-ink-700 hover:bg-parchment-100; }
   .btn-danger  { @apply btn bg-pip-red text-white hover:brightness-110; }
+  .btn-violet  { @apply btn bg-pip-violet text-white hover:brightness-110; }
 
   /* Small square icon button, same press physics. */
   .btn-icon {

@@ -1,9 +1,16 @@
+/** Which group a card belongs to. Events resolve at the table and are never held. */
+export type CardKind = 'lucky' | 'cursed' | 'event';
+
+/** The set of kinds a single draw permission may pull from. */
+export type DrawPool = 'lucky' | 'cursed' | 'mixed' | 'event';
+
 export interface Card {
   id: string;
   title: string;
   image_path: string;
   weight: number;
   active: boolean;
+  kind: CardKind;
 }
 
 export interface Room {
@@ -35,8 +42,17 @@ export interface HeldCard {
   card_id: string;
   title: string;
   image_path: string;
+  kind?: CardKind;
   source: 'draw' | 'grant';
   acquired_at: string;
+}
+
+/** An event card as it comes back from a draw: shown, resolved, never held. */
+export interface EventDraw {
+  card_id: string;
+  title: string;
+  image_path: string;
+  at?: string;
 }
 
 export interface PendingAction {
@@ -44,6 +60,8 @@ export interface PendingAction {
   player_id: string;
   room_code: string;
   action: 'draw' | 'discard';
+  /** Null for discards; the pool to draw from otherwise. */
+  pool: DrawPool | null;
   issued_by: string;
   issued_at: string;
   consumed_at?: string | null;
@@ -61,4 +79,5 @@ export interface CommandLogEntry {
   undone: boolean;
   at: string;
   card_title?: string | null;
+  card_kind?: CardKind | null;
 }

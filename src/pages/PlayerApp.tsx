@@ -1,19 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
-  Trash2, X, Copy, ShieldAlert, ArrowRight, Plus, Minus, LogOut,
+  Trash2, X, Copy, ShieldAlert, ArrowRight, Plus, Minus, LogOut, Zap,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
 import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
-import { HeldCard } from '../types/database';
+import { CardKind, DrawPool, EventDraw, HeldCard } from '../types/database';
+import {
+  DRAW_POOLS, KIND_LABEL, POOL_BUTTON, POOL_DRAW_PHRASE, POOL_KINDS, POOL_LABEL, POOL_TONE,
+  normalisePool,
+} from '../lib/pools';
 
 // Sample fallback cards for offline / demo mode
-const DEMO_CARDS = [
-  { id: '1', title: 'Shield of Faith', image_path: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80' },
-  { id: '2', title: 'Phoenix Flame', image_path: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80' },
-  { id: '3', title: 'Ancient Elixir', image_path: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=600&q=80' },
-  { id: '4', title: 'Shadow Cloak', image_path: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80' }
+const DEMO_CARDS: Array<{ id: string; title: string; image_path: string; kind: CardKind }> = [
+  { id: '1', title: 'Shield of Faith', image_path: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80', kind: 'lucky' },
+  { id: '2', title: 'Phoenix Flame', image_path: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80', kind: 'lucky' },
+  { id: '3', title: 'Ancient Elixir', image_path: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=600&q=80', kind: 'cursed' },
+  { id: '4', title: 'Shadow Cloak', image_path: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80', kind: 'event' }
 ];
 
 export const PlayerApp: React.FC = () => {
@@ -30,7 +34,10 @@ export const PlayerApp: React.FC = () => {
 
   // App UI state
   const [hand, setHand] = useState<HeldCard[]>([]);
-  const [pendingDrawCount, setPendingDrawCount] = useState(0);
+  // One entry per outstanding draw, oldest first, each naming the pool the
+  // host opened it from. The server consumes them in this order, so the head
+  // of the queue is the pool the next tap of the draw button pulls from.
+  const [pendingDrawPools, setPendingDrawPools] = useState<DrawPool[]>([]);
   const [pendingDiscardCount, setPendingDiscardCount] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isPreloading, setIsPreloading] = useState(false);
@@ -38,9 +45,16 @@ export const PlayerApp: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [zoomedCard, setZoomedCard] = useState<HeldCard | null>(null);
   const [cardToDiscard, setCardToDiscard] = useState<HeldCard | null>(null);
+  // Events are shown once and never held, so the reveal is their whole life on
+  // this screen; lastEvent keeps the most recent one reachable after a refresh.
+  const [revealedEvent, setRevealedEvent] = useState<EventDraw | null>(null);
+  const [lastEvent, setLastEvent] = useState<EventDraw | null>(null);
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [isRemoved, setIsRemoved] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const pendingDrawCount = pendingDrawPools.length;
+  const nextDrawPool: DrawPool = pendingDrawPools[0] ?? 'mixed';
 
   // Connection monitoring
   useEffect(() => {
@@ -74,6 +88,8 @@ export const PlayerApp: React.FC = () => {
     localStorage.removeItem('lyney_player_session');
     setJoinedPlayer(null);
     setHand([]);
+    setRevealedEvent(null);
+    setLastEvent(null);
     setErrorMsg(null);
   };
 
@@ -87,6 +103,7 @@ export const PlayerApp: React.FC = () => {
           card_id: DEMO_CARDS[0].id,
           title: DEMO_CARDS[0].title,
           image_path: DEMO_CARDS[0].image_path,
+          kind: DEMO_CARDS[0].kind,
           source: 'draw',
           acquired_at: new Date().toISOString(),
         },
@@ -95,11 +112,12 @@ export const PlayerApp: React.FC = () => {
           card_id: DEMO_CARDS[1].id,
           title: DEMO_CARDS[1].title,
           image_path: DEMO_CARDS[1].image_path,
+          kind: DEMO_CARDS[1].kind,
           source: 'grant',
           acquired_at: new Date().toISOString(),
         },
       ]);
-      setPendingDrawCount(1);
+      setPendingDrawPools(['mixed']);
       return;
     }
 
@@ -125,6 +143,7 @@ export const PlayerApp: React.FC = () => {
       if (data?.hand) {
         setHand(data.hand);
       }
+      setLastEvent(data?.last_event ?? null);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error fetching player data');
     }
@@ -142,10 +161,12 @@ export const PlayerApp: React.FC = () => {
         .is('revoked_at', null);
 
       if (data) {
-        const draws = data.filter((a) => a.action === 'draw').length;
-        const discards = data.filter((a) => a.action === 'discard').length;
-        setPendingDrawCount(draws);
-        setPendingDiscardCount(discards);
+        const draws = data
+          .filter((a) => a.action === 'draw')
+          .sort((a, b) => new Date(a.issued_at).getTime() - new Date(b.issued_at).getTime())
+          .map((a) => normalisePool(a.pool));
+        setPendingDrawPools(draws);
+        setPendingDiscardCount(data.filter((a) => a.action === 'discard').length);
       }
     } catch (err) {
       console.error('Error fetching pending actions:', err);
@@ -262,6 +283,7 @@ export const PlayerApp: React.FC = () => {
       const pData = data.player;
       setJoinedPlayer(pData);
       setHand(data.hand || []);
+      setLastEvent(data.last_event ?? null);
       localStorage.setItem('lyney_player_session', JSON.stringify({ player: pData }));
       runPreload();
     } catch (err: any) {
@@ -274,17 +296,33 @@ export const PlayerApp: React.FC = () => {
     if (pendingDrawCount <= 0 && !isDemoMode) return;
 
     if (isDemoMode) {
-      const randomCard = DEMO_CARDS[Math.floor(Math.random() * DEMO_CARDS.length)];
+      const poolCards = DEMO_CARDS.filter((c) => POOL_KINDS[nextDrawPool].includes(c.kind));
+      if (poolCards.length === 0) return;
+      const randomCard = poolCards[Math.floor(Math.random() * poolCards.length)];
+      setPendingDrawPools((prev) => prev.slice(1));
+
+      if (randomCard.kind === 'event') {
+        const event: EventDraw = {
+          card_id: randomCard.id,
+          title: randomCard.title,
+          image_path: randomCard.image_path,
+          at: new Date().toISOString(),
+        };
+        setRevealedEvent(event);
+        setLastEvent(event);
+        return;
+      }
+
       const newCard: HeldCard = {
         held_card_id: 'h-' + Date.now(),
         card_id: randomCard.id,
         title: randomCard.title,
         image_path: randomCard.image_path,
+        kind: randomCard.kind,
         source: 'draw',
         acquired_at: new Date().toISOString(),
       };
       setHand((prev) => [newCard, ...prev]);
-      setPendingDrawCount((prev) => Math.max(0, prev - 1));
       return;
     }
 
@@ -296,9 +334,11 @@ export const PlayerApp: React.FC = () => {
       if (error) {
         if (error.code === 'P0001') {
           setErrorMsg('Permission expired or window closed by host.');
-          setPendingDrawCount(0);
+          setPendingDrawPools([]);
         } else if (error.code === 'P0008') {
           setErrorMsg('Hand is full — discard a card first.');
+        } else if (error.code === 'P0022' || error.message.includes('no_cards_in_pool')) {
+          setErrorMsg('That pool has no cards right now — your host needs to fix the deck.');
         } else {
           setErrorMsg(error.message);
         }
@@ -306,8 +346,22 @@ export const PlayerApp: React.FC = () => {
       }
 
       if (data) {
-        setHand((prev) => [data, ...prev]);
-        setPendingDrawCount((prev) => Math.max(0, prev - 1));
+        setPendingDrawPools((prev) => prev.slice(1));
+
+        // An event card is revealed once and resolved at the table; it is
+        // never part of the hand, so it deliberately goes nowhere near it.
+        if (data.ephemeral) {
+          const event: EventDraw = {
+            card_id: data.card_id,
+            title: data.title,
+            image_path: data.image_path,
+            at: data.acquired_at,
+          };
+          setRevealedEvent(event);
+          setLastEvent(event);
+        } else {
+          setHand((prev) => [data, ...prev]);
+        }
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Draw action failed');
@@ -556,9 +610,15 @@ export const PlayerApp: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5">
-            {pendingDrawCount > 0 && (
-              <Token tone="cyan" size="sm" label={`+${pendingDrawCount}`} title="Draws available" />
-            )}
+            {DRAW_POOLS.filter((pool) => pendingDrawPools.includes(pool)).map((pool) => (
+              <Token
+                key={pool}
+                tone={POOL_TONE[pool]}
+                size="sm"
+                label={`+${pendingDrawPools.filter((p) => p === pool).length}`}
+                title={`${POOL_LABEL[pool]} draws available`}
+              />
+            ))}
             {pendingDiscardCount > 0 && (
               <Token tone="red" size="sm" label={`−${pendingDiscardCount}`} title="Discards required" />
             )}
@@ -566,15 +626,36 @@ export const PlayerApp: React.FC = () => {
             {/* Quick Demo Action Trigger for testing */}
             {isDemoMode && (
               <button
-                onClick={() => setPendingDrawCount((prev) => prev + 1)}
+                onClick={() =>
+                  setPendingDrawPools((prev) => [...prev, DRAW_POOLS[prev.length % DRAW_POOLS.length]])
+                }
                 className="btn-icon"
-                title="Demo: grant a draw"
+                title="Demo: queue a draw (cycles through the pools)"
               >
                 <Plus className="w-4 h-4" strokeWidth={3} />
               </button>
             )}
           </div>
         </div>
+
+        {/* The last event drawn. It never entered the hand, so this strip is
+            the only way back to it after the reveal is dismissed. */}
+        {lastEvent && (
+          <button
+            onClick={() => setRevealedEvent(lastEvent)}
+            className="slab w-full mb-4 px-3 py-2.5 flex items-center gap-2.5 text-left"
+          >
+            <Token tone="violet" size="sm" icon={Zap} />
+            <span className="min-w-0">
+              <span className="block font-display font-extrabold text-xs text-ink-800 truncate">
+                Latest event: {lastEvent.title}
+              </span>
+              <span className="block text-[11px] font-semibold text-ink-500">
+                Resolved at the table, not held — tap to look again
+              </span>
+            </span>
+          </button>
+        )}
 
         {/* Hand Cards Grid / Stack */}
         {hand.length === 0 ? (
@@ -592,6 +673,7 @@ export const PlayerApp: React.FC = () => {
                 key={card.held_card_id}
                 title={card.title}
                 imagePath={card.image_path}
+                kind={card.kind}
                 source={card.source}
                 canDiscard={pendingDiscardCount > 0 || isDemoMode}
                 onDiscard={() => setCardToDiscard(card)}
@@ -606,9 +688,20 @@ export const PlayerApp: React.FC = () => {
       <footer className="fixed bottom-0 inset-x-0 path-strip border-t-[3px] border-ink-900 p-3 pb-4 z-40">
         <div className="max-w-md mx-auto">
           {pendingDrawCount > 0 ? (
-            <button onClick={handleDraw} className="btn-cyan w-full !py-4 text-lg animate-bob">
-              <Token tone="gold" size="sm" label="+" className="!ring-2" />
-              <span>Draw a card{pendingDrawCount > 1 ? ` ×${pendingDrawCount}` : ''}</span>
+            <button
+              onClick={handleDraw}
+              className={`${POOL_BUTTON[nextDrawPool]} w-full !py-4 text-lg animate-bob`}
+            >
+              <Token
+                tone="gold"
+                size="sm"
+                label={nextDrawPool === 'event' ? '!' : '+'}
+                className="!ring-2"
+              />
+              <span>
+                {POOL_DRAW_PHRASE[nextDrawPool]}
+                {pendingDrawCount > 1 ? ` (${pendingDrawCount} queued)` : ''}
+              </span>
             </button>
           ) : (
             <div className="slab w-full py-3.5 px-4 text-center flex items-center justify-center gap-2 font-display font-bold text-sm text-ink-500">
@@ -682,9 +775,40 @@ export const PlayerApp: React.FC = () => {
             <CardView
               title={zoomedCard.title}
               imagePath={zoomedCard.image_path}
+              kind={zoomedCard.kind}
               source={zoomedCard.source}
               className="w-full max-w-[340px]"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Event Reveal — shown once, kept by nobody */}
+      {revealedEvent && (
+        <div className="board-scrim">
+          <div className="relative max-w-sm w-full flex flex-col items-center animate-pop">
+            <div className="chip bg-pip-violet text-white mb-3">
+              <Zap className="w-3.5 h-3.5" strokeWidth={2.75} /> {KIND_LABEL.event} card
+            </div>
+
+            <CardView
+              title={revealedEvent.title}
+              imagePath={revealedEvent.image_path}
+              kind="event"
+              className="w-full max-w-[340px]"
+            />
+
+            <p className="text-[11px] font-semibold text-parchment-50 text-center mt-3 mb-3 max-w-[300px]">
+              Show this to your table and resolve it now. Event cards are not kept, so it
+              will not appear in your hand.
+            </p>
+
+            <button
+              onClick={() => setRevealedEvent(null)}
+              className="btn-violet w-full max-w-[340px] !py-3 !text-sm"
+            >
+              Resolved
+            </button>
           </div>
         </div>
       )}

@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, RefreshCw, FlaskConical, ZoomIn, Trash2 } from 'lucide-react';
 import { getPublicStorageUrl } from '../lib/supabase';
 import { Token } from './BoardBits';
+import { KIND_LABEL, KIND_TONE } from '../lib/pools';
+import { CardKind } from '../types/database';
 
 interface CardViewProps {
   title: string;
   imagePath: string;
+  kind?: CardKind;
   source?: 'draw' | 'grant';
   isNew?: boolean;
   onDiscard?: () => void;
@@ -17,6 +20,7 @@ interface CardViewProps {
 export const CardView: React.FC<CardViewProps> = ({
   title,
   imagePath,
+  kind,
   source,
   isNew,
   onDiscard,
@@ -54,19 +58,23 @@ export const CardView: React.FC<CardViewProps> = ({
                   transition-transform duration-200 hover:-translate-y-1.5 hover:rotate-[-1deg] ${className}`}
     >
       <div className="relative aspect-[3/4] w-full rounded-[0.7rem] overflow-hidden bg-parchment-100">
-        {/* Source token, sitting on the frame like a board pickup */}
-        {source === 'grant' && (
-          <Token
-            tone="leaf"
-            size="sm"
-            icon={FlaskConical}
-            title="Granted by host"
-            className="absolute top-2 left-2 z-20"
-          />
-        )}
-        {isNew && source === 'draw' && (
-          <Token tone="cyan" size="sm" label="NEW" title="Just drawn" className="absolute top-2 left-2 z-20 !text-[9px]" />
-        )}
+        {/* Group and source tokens, stacked on the frame like board pickups */}
+        <div className="absolute top-2 left-2 z-20 flex flex-col gap-1.5">
+          {kind && (
+            <Token
+              tone={KIND_TONE[kind]}
+              size="sm"
+              label={KIND_LABEL[kind].charAt(0)}
+              title={`${KIND_LABEL[kind]} card`}
+            />
+          )}
+          {source === 'grant' && (
+            <Token tone="leaf" size="sm" icon={FlaskConical} title="Granted by host" />
+          )}
+          {isNew && source === 'draw' && (
+            <Token tone="cyan" size="sm" label="NEW" title="Just drawn" className="!text-[9px]" />
+          )}
+        </div>
 
         {/* Card Image or Degraded State */}
         {loadState !== 'error' ? (

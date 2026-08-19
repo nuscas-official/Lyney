@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import {
   Shield, Users, Layers, RotateCcw, Plus, Trash2,
-  UserX, UserCheck, RefreshCw, Sliders, X,
+  UserX, UserCheck, RefreshCw, Sliders, X, Zap,
 } from 'lucide-react';
 import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
 import { Token, Standee, PaperChip, BoardHeading } from '../components/BoardBits';
-import { Card } from '../types/database';
+import { Card, CardKind, DrawPool } from '../types/database';
+import {
+  CARD_KINDS, DRAW_POOLS, KIND_LABEL, KIND_TONE, POOL_KINDS, POOL_LABEL, POOL_TONE,
+} from '../lib/pools';
 
 // Sample mock data for standalone local demo mode
 const INITIAL_DEMO_CARDS: Card[] = [
-  { id: 'c1', title: 'Shield of Faith', image_path: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80', weight: 1, active: true },
-  { id: 'c2', title: 'Phoenix Flame', image_path: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80', weight: 2, active: true },
-  { id: 'c3', title: 'Ancient Elixir', image_path: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=600&q=80', weight: 1, active: true },
-  { id: 'c4', title: 'Shadow Cloak', image_path: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80', weight: 1, active: true },
+  { id: 'c1', title: 'Shield of Faith', image_path: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80', weight: 1, active: true, kind: 'lucky' },
+  { id: 'c2', title: 'Phoenix Flame', image_path: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80', weight: 2, active: true, kind: 'lucky' },
+  { id: 'c3', title: 'Ancient Elixir', image_path: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=600&q=80', weight: 1, active: true, kind: 'cursed' },
+  { id: 'c4', title: 'Shadow Cloak', image_path: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80', weight: 1, active: true, kind: 'event' },
 ];
 
 interface HostPlayer {
@@ -20,8 +23,25 @@ interface HostPlayer {
   name: string;
   player_code: string;
   active: boolean;
-  hand: Array<{ held_card_id: string; card_id: string; title: string; image_path: string; source: 'draw' | 'grant' }>;
+  hand: Array<{
+    held_card_id: string;
+    card_id: string;
+    title: string;
+    image_path: string;
+    kind?: CardKind;
+    source: 'draw' | 'grant';
+  }>;
   hasActedInWindow?: boolean;
+}
+
+/** An event draw, which leaves no card in a hand — this feed is the only
+    place the host can see one. */
+interface RoomEvent {
+  seq: number;
+  player_id: string;
+  player_name: string;
+  title: string;
+  at: string;
 }
 
 const INITIAL_DEMO_PLAYERS: HostPlayer[] = [
@@ -52,12 +72,14 @@ export const HostDashboard: React.FC = () => {
   // Room data state (empty when connected to Supabase!)
   const [players, setPlayers] = useState<HostPlayer[]>(isDemoMode ? INITIAL_DEMO_PLAYERS : []);
   const [cards, setCards] = useState<Card[]>(isDemoMode ? INITIAL_DEMO_CARDS : []);
+  const [recentEvents, setRecentEvents] = useState<RoomEvent[]>([]);
   const [lastActionText, setLastActionText] = useState<string | null>(null);
 
   // Permission Bar Controls
   const [permScope, setPermScope] = useState<'room' | 'player'>('room');
   const [targetPlayerId, setTargetPlayerId] = useState('');
   const [permAction, setPermAction] = useState<'draw' | 'discard'>('draw');
+  const [permPool, setPermPool] = useState<DrawPool>('mixed');
   const [permCount, setPermCount] = useState(1);
   const [windowOpen, setWindowOpen] = useState(false);
 
@@ -86,8 +108,10 @@ export const HostDashboard: React.FC = () => {
       // Update cards catalog
       if (data.cards) {
         setCards(data.cards);
-        if (data.cards.length > 0 && !selectedGrantCardId) {
-          setSelectedGrantCardId(data.cards[0].id);
+        // Event cards cannot be granted, so they are never the default choice.
+        const firstGrantable = data.cards.find((c: Card) => c.kind !== 'event');
+        if (firstGrantable && !selectedGrantCardId) {
+          setSelectedGrantCardId(firstGrantable.id);
         }
       }
 
@@ -103,6 +127,7 @@ export const HostDashboard: React.FC = () => {
             card_id: h.card_id,
             title: h.title || 'Unknown Card',
             image_path: h.image_path || '',
+            kind: h.kind as CardKind | undefined,
             source: h.source as 'draw' | 'grant',
           }));
 
@@ -119,6 +144,17 @@ export const HostDashboard: React.FC = () => {
       });
 
       setPlayers(mappedPlayers);
+
+      const nameById = new Map<string, string>(playersList.map((p: any) => [p.id, p.name]));
+      setRecentEvents(
+        (data.recent_events || []).map((e: any) => ({
+          seq: e.seq,
+          player_id: e.player_id,
+          player_name: nameById.get(e.player_id) || 'Unknown player',
+          title: e.title,
+          at: e.at,
+        }))
+      );
     } catch (err) {
       console.error('Error fetching room data:', err);
     }
@@ -234,6 +270,12 @@ export const HostDashboard: React.FC = () => {
     }
   };
 
+  // What the banner and the button say about the window being opened
+  const describePermission = () =>
+    permAction === 'draw'
+      ? `Issued DRAW ×${permCount} from ${POOL_LABEL[permPool]} (${permScope})`
+      : `Issued DISCARD ×${permCount} (${permScope})`;
+
   // Issue Permission Handler
   const handleIssuePermission = async () => {
     const cleanRoom = roomCode.trim().toUpperCase();
@@ -251,7 +293,7 @@ export const HostDashboard: React.FC = () => {
           return p;
         })
       );
-      setLastActionText(`Issued ${permAction.toUpperCase()} ×${permCount} (${permScope})`);
+      setLastActionText(describePermission());
       return;
     }
 
@@ -262,13 +304,22 @@ export const HostDashboard: React.FC = () => {
         p_action: permAction,
         p_count: permCount,
         p_target_id: permScope === 'player' ? targetPlayerId || null : null,
+        // Discards have no pool; the server ignores what is sent for them.
+        p_pool: permAction === 'draw' ? permPool : null,
       });
 
       if (error) {
-        alert(error.message);
+        if (error.code === 'P0022' || error.message.includes('no_cards_in_pool')) {
+          alert(
+            `There are no active ${POOL_LABEL[permPool]} cards in the catalog, so ` +
+              'nobody could draw from that pool. Add some, or pick another pool.'
+          );
+        } else {
+          alert(error.message);
+        }
       } else {
         setWindowOpen(true);
-        setLastActionText(`Issued ${permAction.toUpperCase()} ×${permCount} (${permScope})`);
+        setLastActionText(describePermission());
         fetchRoomData();
       }
     } catch (err: any) {
@@ -282,27 +333,50 @@ export const HostDashboard: React.FC = () => {
 
     if (isDemoMode) {
       if (permAction === 'draw') {
-        setPlayers((prev) =>
-          prev.map((p) => {
-            if (!p.active) return p;
-            if (
-              (permScope === 'room' || (permScope === 'player' && p.id === targetPlayerId)) &&
-              !p.hasActedInWindow
-            ) {
-              const randomCard = cards[Math.floor(Math.random() * cards.length)];
-              const autoCard = {
-                held_card_id: 'auto-' + Date.now() + '-' + p.id,
-                card_id: randomCard.id,
-                title: randomCard.title,
-                image_path: randomCard.image_path,
-                source: 'draw' as const,
-              };
-              return { ...p, hand: [autoCard, ...p.hand], hasActedInWindow: true };
-            }
+        const poolCards = cards.filter((c) => POOL_KINDS[permPool].includes(c.kind));
+        const drawnEvents: RoomEvent[] = [];
+
+        const nextPlayers = players.map((p) => {
+          if (!p.active) return p;
+          if (
+            (permScope !== 'room' && !(permScope === 'player' && p.id === targetPlayerId)) ||
+            p.hasActedInWindow ||
+            poolCards.length === 0
+          ) {
             return p;
-          })
-        );
-        setLastActionText(`Closed window & auto-drawn for unacted players`);
+          }
+
+          const randomCard = poolCards[Math.floor(Math.random() * poolCards.length)];
+
+          // An event card is announced and resolved at the table, so it lands
+          // in the event feed instead of the player's hand.
+          if (randomCard.kind === 'event') {
+            drawnEvents.push({
+              seq: Date.now() + drawnEvents.length,
+              player_id: p.id,
+              player_name: p.name,
+              title: randomCard.title,
+              at: new Date().toISOString(),
+            });
+            return { ...p, hasActedInWindow: true };
+          }
+
+          const autoCard = {
+            held_card_id: 'auto-' + Date.now() + '-' + p.id,
+            card_id: randomCard.id,
+            title: randomCard.title,
+            image_path: randomCard.image_path,
+            kind: randomCard.kind,
+            source: 'draw' as const,
+          };
+          return { ...p, hand: [autoCard, ...p.hand], hasActedInWindow: true };
+        });
+
+        setPlayers(nextPlayers);
+        if (drawnEvents.length > 0) {
+          setRecentEvents((evts) => [...drawnEvents, ...evts]);
+        }
+        setLastActionText(`Closed window & auto-drawn ${POOL_LABEL[permPool]} for unacted players`);
       } else {
         setLastActionText(`Closed discard window`);
       }
@@ -342,6 +416,7 @@ export const HostDashboard: React.FC = () => {
         card_id: cardToGrant.id,
         title: cardToGrant.title,
         image_path: cardToGrant.image_path,
+        kind: cardToGrant.kind,
         source: 'grant' as const,
       };
 
@@ -500,6 +575,29 @@ export const HostDashboard: React.FC = () => {
     }
   };
 
+  // Move a card between groups from the catalog tab
+  const handleSetCardKind = async (cardId: string, kind: CardKind) => {
+    const previous = cards;
+    setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, kind } : c)));
+
+    if (isDemoMode) return;
+
+    const { error } = await supabase.rpc('set_card_kind', { p_card_id: cardId, p_kind: kind });
+    if (error) {
+      setCards(previous);
+      if (error.code === 'P0026' || error.message.includes('card_in_hands')) {
+        alert(
+          'Players are still holding this card, and event cards are never held. ' +
+            'Revoke their copies first, then move it to Events.'
+        );
+      } else {
+        alert(error.message);
+      }
+      return;
+    }
+    setLastActionText(`Moved a card to ${KIND_LABEL[kind]}`);
+  };
+
   const handleSignOut = () => {
     localStorage.removeItem(HOST_SESSION_KEY);
     setIsHostAuthenticated(false);
@@ -522,7 +620,13 @@ export const HostDashboard: React.FC = () => {
   // Calculate table groups
   const activePlayers = players.filter((p) => p.active);
   const actedCount = activePlayers.filter((p) => p.hasActedInWindow).length;
-  const totalWeight = cards.reduce((sum, c) => sum + (c.active ? c.weight : 0), 0);
+  // Odds are per group: a card only ever competes with the cards it shares a
+  // pool with, so a catalog-wide percentage would be a number nothing uses.
+  const weightByKind = cards.reduce((acc, c) => {
+    if (c.active) acc[c.kind] = (acc[c.kind] || 0) + c.weight;
+    return acc;
+  }, {} as Record<CardKind, number>);
+  const grantableCards = cards.filter((c) => c.kind !== 'event');
 
   // 1. HOST LOGIN SCREEN
   if (!isHostAuthenticated) {
@@ -768,6 +872,25 @@ export const HostDashboard: React.FC = () => {
                   </select>
                 </div>
 
+                {/* Pool — which group the draw comes out of */}
+                {permAction === 'draw' && (
+                  <div>
+                    <label className="field-label">Pool</label>
+                    <select
+                      value={permPool}
+                      onChange={(e) => setPermPool(e.target.value as DrawPool)}
+                      className="field !py-2.5 !text-sm"
+                    >
+                      {DRAW_POOLS.map((pool) => (
+                        <option key={pool} value={pool}>
+                          {POOL_LABEL[pool]} (
+                          {cards.filter((c) => POOL_KINDS[pool].includes(c.kind)).length})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Quantity */}
                 <div>
                   <label className="field-label">How many</label>
@@ -782,6 +905,15 @@ export const HostDashboard: React.FC = () => {
                 </div>
               </div>
 
+              {permAction === 'draw' && permPool === 'event' && (
+                <p className="flex items-start gap-2 text-[11px] font-semibold text-ink-500">
+                  <Zap className="w-3.5 h-3.5 mt-px shrink-0 text-pip-violet" strokeWidth={2.75} />
+                  Event cards are revealed to the player and resolved at the table. They
+                  never enter a hand, so there is nothing to discard afterwards — drawn
+                  events show up in the log below.
+                </p>
+              )}
+
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-3 pt-1">
                 <button
@@ -789,12 +921,14 @@ export const HostDashboard: React.FC = () => {
                   className={`flex-1 !py-4 ${permAction === 'draw' ? 'btn-cyan' : 'btn-danger'}`}
                 >
                   <Token
-                    tone={permAction === 'draw' ? 'gold' : 'paper'}
+                    tone={permAction === 'draw' ? POOL_TONE[permPool] : 'paper'}
                     size="xs"
                     label={permAction === 'draw' ? '+' : '−'}
                     className="!ring-2"
                   />
-                  Open {permAction} window ×{permCount}
+                  {permAction === 'draw'
+                    ? `Open ${POOL_LABEL[permPool]} draw ×${permCount}`
+                    : `Open discard window ×${permCount}`}
                 </button>
 
                 {windowOpen && (
@@ -804,6 +938,29 @@ export const HostDashboard: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Event Log — the only trace an event draw leaves */}
+            {recentEvents.length > 0 && (
+              <div className="panel p-4 sm:p-5 space-y-3">
+                <BoardHeading
+                  icon={Zap}
+                  tone="violet"
+                  title="Events drawn"
+                  subtitle="Resolved at the table — these never entered a hand"
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  {recentEvents.map((e) => (
+                    <span key={e.seq} className="chip bg-pip-violet text-white">
+                      <span className="truncate max-w-[120px] opacity-80">{e.player_name}</span>
+                      <span className="truncate max-w-[160px]">{e.title}</span>
+                      <span className="opacity-70 font-mono text-[10px]">
+                        {new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Player Cards Grid */}
             <div className="space-y-4">
@@ -900,6 +1057,14 @@ export const HostDashboard: React.FC = () => {
                                   key={h.held_card_id}
                                   className={`chip ${h.source === 'grant' ? 'bg-pip-leaf' : 'bg-white'}`}
                                 >
+                                  {h.kind && (
+                                    <span
+                                      className="font-extrabold text-ink-400"
+                                      title={`${KIND_LABEL[h.kind]} card`}
+                                    >
+                                      {KIND_LABEL[h.kind].charAt(0)}
+                                    </span>
+                                  )}
                                   <span className="truncate max-w-[110px]">{h.title}</span>
                                   {player.active && (
                                     <button
@@ -932,7 +1097,7 @@ export const HostDashboard: React.FC = () => {
                 icon={Layers}
                 tone="violet"
                 title="Card catalog"
-                subtitle="Which cards are in the deck, and how often they turn up"
+                subtitle="Which group each card sits in, and how often it turns up"
               />
               <button onClick={fetchRoomData} className="btn-paper !py-2.5 !px-4 !text-xs">
                 <RefreshCw className="w-4 h-4" strokeWidth={2.75} /> Refresh
@@ -942,18 +1107,20 @@ export const HostDashboard: React.FC = () => {
             {/* Card Weights Table */}
             <div className="panel overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[520px]">
+                <table className="w-full text-left border-collapse min-w-[680px]">
                   <thead>
                     <tr className="path-strip border-b-[3px] border-ink-900 font-display text-[11px] font-extrabold text-ink-700 uppercase tracking-wide">
                       <th className="py-3 px-4">Card</th>
+                      <th className="py-3 px-4">Group</th>
                       <th className="py-3 px-4">Artwork path</th>
                       <th className="py-3 px-4 text-center">Weight</th>
-                      <th className="py-3 px-4 text-right">Odds</th>
+                      <th className="py-3 px-4 text-right">Odds in group</th>
                     </tr>
                   </thead>
                   <tbody className="text-xs">
                     {cards.map((card) => {
-                      const prob = totalWeight > 0 ? ((card.weight / totalWeight) * 100).toFixed(1) : '0.0';
+                      const kindWeight = weightByKind[card.kind] || 0;
+                      const prob = kindWeight > 0 ? ((card.weight / kindWeight) * 100).toFixed(1) : '0.0';
                       return (
                         <tr
                           key={card.id}
@@ -961,6 +1128,25 @@ export const HostDashboard: React.FC = () => {
                         >
                           <td className="py-3 px-4 font-display font-extrabold text-sm text-ink-800">
                             {card.title}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <Token
+                                tone={KIND_TONE[card.kind]}
+                                size="xs"
+                                label={KIND_LABEL[card.kind].charAt(0)}
+                                title={`${KIND_LABEL[card.kind]} card`}
+                              />
+                              <select
+                                value={card.kind}
+                                onChange={(e) => handleSetCardKind(card.id, e.target.value as CardKind)}
+                                className="field !w-28 !px-2 !py-1 !text-xs"
+                              >
+                                {CARD_KINDS.map((k) => (
+                                  <option key={k} value={k}>{KIND_LABEL[k]}</option>
+                                ))}
+                              </select>
+                            </div>
                           </td>
                           <td className="py-3 px-4 font-mono text-[11px] text-ink-400 truncate max-w-[220px]">
                             {card.image_path}
@@ -1024,12 +1210,16 @@ export const HostDashboard: React.FC = () => {
                 onChange={(e) => setSelectedGrantCardId(e.target.value)}
                 className="field !py-2.5 !text-sm"
               >
-                {cards.map((c) => (
+                {grantableCards.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.title} (weight {c.weight})
+                    {KIND_LABEL[c.kind]} — {c.title} (weight {c.weight})
                   </option>
                 ))}
               </select>
+              <p className="text-[11px] font-semibold text-ink-400 mt-1.5">
+                Event cards are not listed: they are resolved at the table, never held.
+                Open an event draw window for this player instead.
+              </p>
             </div>
 
             <div className="flex gap-2">
