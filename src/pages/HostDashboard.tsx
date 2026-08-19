@@ -40,8 +40,8 @@ export const HostDashboard: React.FC = () => {
   // Auth state
   const [roomCode, setRoomCode] = useState('');
   const [roomLabel, setRoomLabel] = useState('');
-  const [hostPin, setHostPin] = useState('1234');
-  const [isCreatingNewRoom, setIsCreatingNewRoom] = useState(false);
+  const [hostPin, setHostPin] = useState('');
+  const [isCreatingNewRoom, setIsCreatingNewRoom] = useState(true);
   const [isHostAuthenticated, setIsHostAuthenticated] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(!isDemoMode);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -142,16 +142,21 @@ export const HostDashboard: React.FC = () => {
 
         await ensureAuthSession();
         // Re-claim rather than trusting localStorage: this revalidates the PIN
-        // and re-registers the room_hosts row if the anon uid was rotated.
+        // and re-registers the room_hosts row on a device that has not hosted
+        // this room before. The anon uid is stable per browser, so a reopened
+        // tab claims the same identity and no new room_hosts row appears.
         const { error } = await supabase.rpc('claim_host', { p_code: code, p_pin: pin });
         if (error) {
+          // The saved credentials are genuinely bad (room gone, PIN changed).
           localStorage.removeItem(HOST_SESSION_KEY);
         } else {
           setIsHostAuthenticated(true);
         }
       } catch (err) {
+        // Keep the saved session: this is a failure to reach auth, not proof
+        // that the host is no longer the host. Dropping it here would sign
+        // them out of a live table over a blip.
         console.error('Failed to restore host session:', err);
-        localStorage.removeItem(HOST_SESSION_KEY);
       } finally {
         setIsRestoringSession(false);
       }
@@ -198,7 +203,7 @@ export const HostDashboard: React.FC = () => {
         });
         if (error) {
           if (error.code === 'P0019' || error.message.includes('label_required')) {
-            alert('Please name this room, e.g. "Table 3".');
+            alert('Please name this room, e.g. "CASuals 4".');
           } else {
             alert(error.message);
           }
@@ -519,7 +524,7 @@ export const HostDashboard: React.FC = () => {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-4 py-10">
         <div className="text-center mb-7">
-          <Token tone="gold" size="lg" icon={Shield} className="mx-auto mb-3" />
+          <Token tone="gold" size="lg" imageSrc="/images/lynette.webp" className="mx-auto mb-3" />
           <h1 className="board-sign text-4xl leading-none -rotate-1 mb-1.5">Host Console</h1>
           <p className="font-display font-bold text-xs uppercase tracking-[0.18em] text-board-800">
             Run the table
@@ -531,21 +536,21 @@ export const HostDashboard: React.FC = () => {
           <div className="flex gap-1 p-1 mb-6 rounded-2xl bg-parchment-200 border-[2.5px] border-ink-900">
             <button
               type="button"
-              onClick={() => setIsCreatingNewRoom(false)}
-              className={`flex-1 py-2 rounded-xl font-display font-bold text-xs transition-colors ${
-                !isCreatingNewRoom ? 'bg-pip-gold text-ink-900 shadow-sticker-sm' : 'text-ink-500'
-              }`}
-            >
-              Access room
-            </button>
-            <button
-              type="button"
               onClick={() => setIsCreatingNewRoom(true)}
               className={`flex-1 py-2 rounded-xl font-display font-bold text-xs transition-colors ${
                 isCreatingNewRoom ? 'bg-pip-gold text-ink-900 shadow-sticker-sm' : 'text-ink-500'
               }`}
             >
               Create room
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCreatingNewRoom(false)}
+              className={`flex-1 py-2 rounded-xl font-display font-bold text-xs transition-colors ${
+                !isCreatingNewRoom ? 'bg-pip-gold text-ink-900 shadow-sticker-sm' : 'text-ink-500'
+              }`}
+            >
+              Access room
             </button>
           </div>
 
@@ -557,7 +562,7 @@ export const HostDashboard: React.FC = () => {
                   type="text"
                   value={roomLabel}
                   onChange={(e) => setRoomLabel(e.target.value)}
-                  placeholder="e.g. Table 3"
+                  placeholder="e.g. CASuals 4"
                   className="field"
                   required
                 />
@@ -572,8 +577,8 @@ export const HostDashboard: React.FC = () => {
                   type="text"
                   value={roomCode}
                   onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                  placeholder="e.g. K7M4QP"
-                  className="field font-mono tracking-[0.15em] uppercase"
+                  placeholder="e.g. 9X2B7L"
+                  className="field uppercase"
                   required
                 />
               </div>
@@ -587,7 +592,7 @@ export const HostDashboard: React.FC = () => {
                 value={hostPin}
                 onChange={(e) => setHostPin(e.target.value)}
                 placeholder="e.g. 1234"
-                className="field font-mono tracking-[0.2em]"
+                className="field"
                 required
               />
             </div>
@@ -607,7 +612,7 @@ export const HostDashboard: React.FC = () => {
       <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 sm:px-6 py-3 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <Token tone="gold" size="md" icon={Shield} />
+            <Token tone="gold" size="md" imageSrc="/images/lynette.webp" />
             <div className="min-w-0">
               <h1 className="font-display text-lg font-extrabold text-ink-800 leading-tight truncate">
                 {roomLabel || 'Host Console'}

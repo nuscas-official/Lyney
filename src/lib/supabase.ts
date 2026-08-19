@@ -21,21 +21,22 @@ export function getPublicStorageUrl(imagePath: string): string {
   return data.publicUrl;
 }
 
-export async function ensureAuthSession(): Promise<string | null> {
+export async function ensureAuthSession(): Promise<string> {
   if (isDemoMode) return 'demo-uid';
-  try {
-    let { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      const { data, error } = await supabase.auth.signInAnonymously();
-      if (!error && data?.session) {
-        session = data.session;
-      } else {
-        console.info('Anonymous sign-in notice (will proceed with anon key):', error?.message);
-      }
-    }
-    return session?.user?.id || null;
-  } catch (err) {
-    console.warn('ensureAuthSession notice:', err);
-    return null;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user?.id) return session.user.id;
+
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error || !data?.session) {
+    // Every host- and player-scoped RPC keys off auth.uid(); without a session
+    // the server cannot tell one device from the next. Failing here is louder
+    // than letting the app run unauthenticated.
+    throw new Error(
+      `Could not start a session: ${error?.message ?? 'no session returned'}. ` +
+      'If this says anonymous sign-ins are disabled, enable them in the ' +
+      'Supabase dashboard under Authentication -> Sign In / Providers.'
+    );
   }
+  return data.session.user.id;
 }

@@ -382,7 +382,7 @@ export const PlayerApp: React.FC = () => {
       <div className="flex-1 flex flex-col items-center justify-center p-4 py-10">
         {/* Header branding — the "START!!!!" sign of the board */}
         <div className="text-center mb-7">
-          <Token tone="crimson" size="lg" icon={Layers} className="mx-auto mb-3 animate-bob" />
+          <Token tone="crimson" size="lg" imageSrc="/images/lyney.webp" className="mx-auto mb-3 animate-bob" />
           <h1 className="board-sign text-5xl leading-none -rotate-2 mb-2">Lyney</h1>
           <p className="font-display font-bold text-xs tracking-[0.18em] text-board-800">
             Card companion · NUSCASuals
@@ -412,8 +412,8 @@ export const PlayerApp: React.FC = () => {
                 type="text"
                 value={roomCode}
                 onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="e.g. DEMO1"
-                className="field font-mono tracking-[0.15em] uppercase"
+                placeholder="e.g. 9X2B7L"
+                className="field uppercase"
                 required
               />
             </div>
@@ -431,7 +431,7 @@ export const PlayerApp: React.FC = () => {
                   value={rejoinCodeInput}
                   onChange={(e) => setRejoinCodeInput(e.target.value.toUpperCase())}
                   placeholder="e.g. K7M4QP"
-                  className="field font-mono tracking-[0.15em] uppercase pr-11"
+                  className="field uppercase pr-11"
                 />
                 <Key className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
               </div>
@@ -531,7 +531,7 @@ export const PlayerApp: React.FC = () => {
         {/* Hand Title Header */}
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
-            <Token tone="violet" size="md" icon={Layers} />
+            <Token tone="crimson" size="md" imageSrc="/images/lyney.webp" />
             <div>
               <h1 className="font-display text-xl font-extrabold text-ink-800 leading-tight">Your hand</h1>
               <p className="text-xs font-bold text-ink-500">

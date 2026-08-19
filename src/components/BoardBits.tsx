@@ -32,6 +32,7 @@ interface TokenProps {
   tone?: TokenTone;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   icon?: LucideIcon;
+  imageSrc?: string;
   /** Short text instead of an icon, e.g. "+1" or "!" */
   label?: string;
   className?: string;
@@ -43,6 +44,7 @@ export const Token: React.FC<TokenProps> = ({
   tone = 'cyan',
   size = 'md',
   icon: Icon,
+  imageSrc,
   label,
   className = '',
   title,
@@ -51,9 +53,15 @@ export const Token: React.FC<TokenProps> = ({
   return (
     <span
       title={title}
-      className={`token ${TONE_FILL[tone]} ${s.box} ${s.text} ${className}`}
+      className={`token ${TONE_FILL[tone]} ${s.box} ${s.text} ${className} overflow-hidden`}
     >
-      {Icon ? <Icon className={s.icon} strokeWidth={2.75} /> : label}
+      {imageSrc ? (
+        <img src={imageSrc} alt="" className="w-full h-full object-cover rounded-full" />
+      ) : Icon ? (
+        <Icon className={s.icon} strokeWidth={2.75} />
+      ) : (
+        label
+      )}
     </span>
   );
 };

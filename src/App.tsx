@@ -37,7 +37,7 @@ export const App: React.FC = () => {
       {/* Universal Top Switcher Bar — styled as the board's dark bezel */}
       <nav className="bg-ink-900 border-b-[3px] border-ink-900 px-3 py-2 flex items-center justify-center sm:justify-between z-50">
         <span className="hidden sm:flex items-center gap-2 font-display font-extrabold text-parchment-200 text-sm tracking-tight">
-          <span className="token bg-crimson-500 text-parchment-50 w-6 h-6 text-xs">L</span>
+          <img src="/images/lyney.webp" alt="Lyney" className="w-6 h-6 rounded-full ring-2 ring-white object-cover" />
           Lyney
         </span>
 
@@ -50,7 +50,7 @@ export const App: React.FC = () => {
                 : 'text-parchment-200/70 hover:text-parchment-100'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" strokeWidth={2.75} /> Player
+            <img src="/images/lyney.webp" alt="" className="w-4 h-4 rounded-full object-cover" /> Player
           </button>
           <button
             onClick={() => navigateTo('host')}
@@ -60,7 +60,7 @@ export const App: React.FC = () => {
                 : 'text-parchment-200/70 hover:text-parchment-100'
             }`}
           >
-            <Shield className="w-3.5 h-3.5" strokeWidth={2.75} /> Host
+            <img src="/images/lynette.webp" alt="" className="w-4 h-4 rounded-full object-cover" /> Host
           </button>
         </div>
       </nav>
