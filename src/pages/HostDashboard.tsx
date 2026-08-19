@@ -11,11 +11,17 @@ import {
 } from '../lib/pools';
 
 // Sample mock data for standalone local demo mode
+// How stale the console is allowed to get: the first is the safety net under a
+// healthy socket, the second is how fast it catches up without one.
+const HEARTBEAT_MS = 30000;
+const OFFLINE_POLL_MS = 5000;
+
 const INITIAL_DEMO_CARDS: Card[] = [
   { id: 'c1', title: 'Shield of Faith', image_path: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80', weight: 1, active: true, kind: 'lucky' },
   { id: 'c2', title: 'Phoenix Flame', image_path: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80', weight: 2, active: true, kind: 'lucky' },
   { id: 'c3', title: 'Ancient Elixir', image_path: 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=600&q=80', weight: 1, active: true, kind: 'cursed' },
   { id: 'c4', title: 'Shadow Cloak', image_path: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80', weight: 1, active: true, kind: 'event' },
+  { id: 'c5', title: 'Sealed Relic', image_path: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80', weight: 0, active: true, kind: 'lucky' },
 ];
 
 interface HostPlayer {
@@ -203,17 +209,45 @@ export const HostDashboard: React.FC = () => {
   useEffect(() => {
     if (isDemoMode || !isHostAuthenticated) return;
 
-    fetchRoomData();
+    let lastSync = 0;
+    let socketHealthy = false;
+
+    const refresh = () => {
+      lastSync = Date.now();
+      fetchRoomData();
+    };
+
+    refresh();
 
     const cleanRoom = roomCode.trim().toUpperCase();
     const channel = supabase
       .channel(`room_realtime_${cleanRoom}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_code=eq.${cleanRoom}` }, () => fetchRoomData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'held_cards', filter: `room_code=eq.${cleanRoom}` }, () => fetchRoomData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_actions', filter: `room_code=eq.${cleanRoom}` }, () => fetchRoomData())
-      .subscribe();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_code=eq.${cleanRoom}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'held_cards', filter: `room_code=eq.${cleanRoom}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_actions', filter: `room_code=eq.${cleanRoom}` }, refresh)
+      .subscribe((status) => {
+        const wasHealthy = socketHealthy;
+        socketHealthy = status === 'SUBSCRIBED';
+        if (socketHealthy && !wasHealthy) refresh();
+      });
+
+    // Same floor the player screen runs on: the host should not have to hit
+    // Refresh to find out that someone drew.
+    const tick = window.setInterval(() => {
+      const due = socketHealthy ? HEARTBEAT_MS : OFFLINE_POLL_MS;
+      if (Date.now() - lastSync >= due) refresh();
+    }, 2000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', refresh);
 
     return () => {
+      window.clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', refresh);
       supabase.removeChannel(channel);
     };
   }, [isHostAuthenticated, roomCode]);
@@ -598,6 +632,26 @@ export const HostDashboard: React.FC = () => {
     setLastActionText(`Moved a card to ${KIND_LABEL[kind]}`);
   };
 
+  // Weight 0 keeps a card in the catalog but out of every pool, so it can only
+  // reach a hand by the host granting it.
+  const handleCommitWeight = async (cardId: string, weight: number) => {
+    if (isDemoMode) return;
+
+    const { error } = await supabase.rpc('set_card_weight', {
+      p_card_id: cardId,
+      p_weight: weight,
+    });
+    if (error) {
+      alert(error.message);
+      // Pull server truth back over the edit that did not land.
+      fetchRoomData();
+      return;
+    }
+    setLastActionText(
+      weight === 0 ? 'Set a card to grant only' : `Set a card's weight to ${weight}`
+    );
+  };
+
   const handleSignOut = () => {
     localStorage.removeItem(HOST_SESSION_KEY);
     setIsHostAuthenticated(false);
@@ -884,7 +938,9 @@ export const HostDashboard: React.FC = () => {
                       {DRAW_POOLS.map((pool) => (
                         <option key={pool} value={pool}>
                           {POOL_LABEL[pool]} (
-                          {cards.filter((c) => POOL_KINDS[pool].includes(c.kind)).length})
+                          {cards.filter((c) => POOL_KINDS[pool].includes(c.kind) && c.weight > 0)
+                            .length}
+                          )
                         </option>
                       ))}
                     </select>
@@ -1097,7 +1153,7 @@ export const HostDashboard: React.FC = () => {
                 icon={Layers}
                 tone="violet"
                 title="Card catalog"
-                subtitle="Which group each card sits in, and how often it turns up"
+                subtitle="Which group each card sits in, and how often it turns up — weight 0 is grant only"
               />
               <button onClick={fetchRoomData} className="btn-paper !py-2.5 !px-4 !text-xs">
                 <RefreshCw className="w-4 h-4" strokeWidth={2.75} /> Refresh
@@ -1154,20 +1210,32 @@ export const HostDashboard: React.FC = () => {
                           <td className="py-3 px-4 text-center">
                             <input
                               type="number"
-                              min="1"
+                              min="0"
                               max="100"
                               value={card.weight}
+                              title="0 keeps this card out of every pool — grant only"
                               onChange={(e) => {
-                                const w = parseInt(e.target.value) || 1;
+                                // Parsed defensively: `|| 1` would silently
+                                // turn a deliberate 0 back into a drawable card.
+                                const parsed = parseInt(e.target.value, 10);
+                                const w = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
                                 setCards((prev) =>
                                   prev.map((c) => (c.id === card.id ? { ...c, weight: w } : c))
                                 );
+                              }}
+                              onBlur={(e) => {
+                                const parsed = parseInt(e.target.value, 10);
+                                handleCommitWeight(card.id, Number.isNaN(parsed) ? 0 : Math.max(0, parsed));
                               }}
                               className="field !w-16 !px-2 !py-1 !text-center font-display font-extrabold"
                             />
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <span className="chip bg-pip-cyan font-mono">{prob}%</span>
+                            {card.weight === 0 ? (
+                              <span className="chip bg-parchment-200">Grant only</span>
+                            ) : (
+                              <span className="chip bg-pip-cyan font-mono">{prob}%</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1212,7 +1280,8 @@ export const HostDashboard: React.FC = () => {
               >
                 {grantableCards.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {KIND_LABEL[c.kind]} — {c.title} (weight {c.weight})
+                    {KIND_LABEL[c.kind]} — {c.title}{' '}
+                    {c.weight === 0 ? '(grant only)' : `(weight ${c.weight})`}
                   </option>
                 ))}
               </select>

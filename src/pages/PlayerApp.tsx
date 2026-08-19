@@ -12,6 +12,12 @@ import {
   normalisePool,
 } from '../lib/pools';
 
+// How stale the player's screen is allowed to get. The first is the safety net
+// under a healthy socket; the second is how fast the screen catches up when
+// realtime is unavailable and polling is all there is.
+const HEARTBEAT_MS = 30000;
+const OFFLINE_POLL_MS = 5000;
+
 // Sample fallback cards for offline / demo mode
 const DEMO_CARDS: Array<{ id: string; title: string; image_path: string; kind: CardKind }> = [
   { id: '1', title: 'Shield of Faith', image_path: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80', kind: 'lucky' },
@@ -68,18 +74,19 @@ export const PlayerApp: React.FC = () => {
     };
   }, []);
 
-  // Restore saved session from localStorage on load
+  // Restore saved session from localStorage on load. Fetching is left to the
+  // subscription effect below: it runs the moment joinedPlayer lands and it
+  // passes the rejoin code, which this path used to drop -- enter_room then
+  // read the missing code as "new player" and answered name_required.
   useEffect(() => {
     const savedSession = localStorage.getItem('lyney_player_session');
-    if (savedSession) {
-      try {
-        const parsed = JSON.parse(savedSession);
-        setJoinedPlayer(parsed.player);
-        setRoomCode(parsed.player.room_code || '');
-        fetchPlayerData(parsed.player.id, parsed.player.room_code);
-      } catch (err) {
-        console.error('Failed to restore session:', err);
-      }
+    if (!savedSession) return;
+    try {
+      const parsed = JSON.parse(savedSession);
+      setJoinedPlayer(parsed.player);
+      setRoomCode(parsed.player.room_code || '');
+    } catch (err) {
+      console.error('Failed to restore session:', err);
     }
   }, []);
 
@@ -121,10 +128,19 @@ export const PlayerApp: React.FC = () => {
       return;
     }
 
+    const code = pCode || joinedPlayer?.player_code;
+    if (!code) {
+      // enter_room reads an absent player code as "create a new player", so a
+      // plain refresh of the hand must never be one missing argument away from
+      // signing the same person up twice under a name it does not have.
+      setErrorMsg('Lost track of your rejoin code. Please rejoin with it.');
+      return;
+    }
+
     try {
       const { data, error } = await supabase.rpc('enter_room', {
         p_room_code: rCode,
-        p_player_code: pCode || joinedPlayer?.player_code,
+        p_player_code: code,
       });
 
       if (error) {
@@ -174,25 +190,79 @@ export const PlayerApp: React.FC = () => {
   };
 
   // Realtime Subscription for Player
+  //
+  // The player never acts on their own screen except to draw and discard, so
+  // everything else they see -- a granted card, an opened window, an event the
+  // host drew for them -- arrives from the host's device. Reloading to find
+  // out is not a workaround on this screen: a reload that outlives the saved
+  // session costs them their rejoin code.
   useEffect(() => {
     if (isDemoMode || !joinedPlayer) return;
 
-    fetchPlayerData(joinedPlayer.id, joinedPlayer.room_code, joinedPlayer.player_code);
-    fetchPendingActions(joinedPlayer.id);
+    const { id, room_code, player_code } = joinedPlayer;
+    let cancelled = false;
+    let lastSync = 0;
+    let socketHealthy = false;
 
-    const channel = supabase
-      .channel(`player_realtime_${joinedPlayer.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'held_cards', filter: `player_id=eq.${joinedPlayer.id}` }, () => {
-        fetchPlayerData(joinedPlayer.id, joinedPlayer.room_code, joinedPlayer.player_code);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_actions', filter: `player_id=eq.${joinedPlayer.id}` }, () => {
-        fetchPlayerData(joinedPlayer.id, joinedPlayer.room_code, joinedPlayer.player_code);
-        fetchPendingActions(joinedPlayer.id);
-      })
-      .subscribe();
+    const refresh = () => {
+      if (cancelled) return;
+      lastSync = Date.now();
+      fetchPlayerData(id, room_code, player_code);
+      fetchPendingActions(id);
+    };
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    (async () => {
+      // A restored session reaches this effect without having signed in this
+      // page load. Every RLS policy on the player's own rows keys off
+      // auth.uid(), so without this the reads come back empty and realtime
+      // has nothing it is allowed to deliver.
+      try {
+        await ensureAuthSession();
+      } catch (err: any) {
+        if (!cancelled) setErrorMsg(err.message || 'Could not start a session.');
+        return;
+      }
+      if (cancelled) return;
+
+      refresh();
+
+      channel = supabase
+        .channel(`player_realtime_${id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'held_cards', filter: `player_id=eq.${id}` }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_actions', filter: `player_id=eq.${id}` }, refresh)
+        // Event cards leave no row in held_cards, so an event the host draws
+        // for this player shows up nowhere else.
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'command_log', filter: `player_id=eq.${id}` }, refresh)
+        .subscribe((status) => {
+          const wasHealthy = socketHealthy;
+          socketHealthy = status === 'SUBSCRIBED';
+          // Catch up on whatever landed while the socket was down.
+          if (socketHealthy && !wasHealthy) refresh();
+        });
+    })();
+
+    // Realtime is the fast path, not the only one. Phones suspend WebSockets
+    // when the screen locks and mid-game reconnects are silent, so poll as a
+    // floor: briskly while the socket is down, rarely while it is up.
+    const tick = window.setInterval(() => {
+      const due = socketHealthy ? HEARTBEAT_MS : OFFLINE_POLL_MS;
+      if (Date.now() - lastSync >= due) refresh();
+    }, 2000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', refresh);
 
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      window.clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', refresh);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [joinedPlayer]);
 
