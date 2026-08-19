@@ -18,6 +18,11 @@ const DEMO_CARDS: Card[] = [
 
 type KindFilter = 'all' | CardKind;
 
+// Plain text sort puts "10" before "2"; this compares embedded number runs
+// numerically so "Event 2" lands before "Event 10".
+const naturalCompare = (a: string, b: string) =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
 /** A read-only browse of the whole card catalog — every card in the game,
     with its artwork, filterable by group. No room or host session needed:
     the `cards` table is readable by anyone, so this is just a shared look
@@ -35,13 +40,12 @@ export const Gallery: React.FC = () => {
     const { data, error: fetchError } = await supabase
       .from('cards')
       .select('*')
-      .order('kind', { ascending: true })
-      .order('title', { ascending: true });
+      .order('kind', { ascending: true });
 
     if (fetchError) {
       setError(fetchError.message);
     } else {
-      setCards(data || []);
+      setCards([...(data || [])].sort((a, b) => a.kind === b.kind ? naturalCompare(a.title, b.title) : 0));
     }
     setLoading(false);
   };
