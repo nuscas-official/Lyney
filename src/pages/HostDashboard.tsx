@@ -203,7 +203,13 @@ export const HostDashboard: React.FC = () => {
         const { error } = await supabase.rpc('claim_host', { p_code: code, p_pin: pin });
         if (error) {
           // The saved credentials are genuinely bad (room gone, PIN changed).
+          // Clear the fields along with the session -- otherwise the login
+          // form reappears with the stale room code and PIN already typed
+          // in, on both the Access and Create tabs since they share the PIN
+          // field.
           localStorage.removeItem(HOST_SESSION_KEY);
+          setRoomCode('');
+          setHostPin('');
         } else {
           setIsHostAuthenticated(true);
         }
@@ -290,7 +296,7 @@ export const HostDashboard: React.FC = () => {
           } else if (error.code === 'P0021' || error.message.includes('label_taken')) {
             alert(
               `A room called "${roomLabel.trim()}" already exists. Pick a different name, ` +
-                'or switch to "Access room" and enter its join code and PIN.'
+                'or switch to "Access room" and enter its room code and PIN.'
             );
           } else {
             alert(error.message);
@@ -746,12 +752,12 @@ export const HostDashboard: React.FC = () => {
                   required
                 />
                 <p className="text-[11px] font-semibold text-ink-400 mt-1.5">
-                  A join code is printed for you once the room exists.
+                  A room code is printed for you once the room exists.
                 </p>
               </div>
             ) : (
               <div>
-                <label className="field-label">Join code</label>
+                <label className="field-label">Room code</label>
                 <input
                   type="text"
                   value={roomCode}
@@ -1038,7 +1044,7 @@ export const HostDashboard: React.FC = () => {
                   <Token tone="paper" size="lg" icon={Users} className="mx-auto mb-3 opacity-70" />
                   <h3 className="font-display text-base font-extrabold text-ink-700">Nobody on the board yet</h3>
                   <p className="text-xs font-semibold text-ink-500 max-w-xs mx-auto mt-1">
-                    Players who enter join code{' '}
+                    Players who enter room code{' '}
                     <strong className="code-stamp">{roomCode}</strong> on their phones show up here live.
                   </p>
                 </div>

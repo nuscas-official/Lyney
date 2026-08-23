@@ -58,7 +58,7 @@ const joinErrorMessage = (error: { code?: string; message: string }): string => 
     return "That rejoin code isn't valid for this room.";
   }
   if (error.code === 'P0004' || error.message.includes('room_not_found')) {
-    return 'No table is using that join code. Check it with your host.';
+    return 'No table is using that room code. Check it with your host.';
   }
   if (error.code === 'P0006' || error.message.includes('player_removed')) {
     return 'Your host removed you from this table.';
@@ -482,7 +482,7 @@ export const PlayerApp: React.FC = () => {
     const cleanRejoin = rejoinCodeInput.trim().toUpperCase();
 
     if (!cleanRoom) {
-      setErrorMsg('Please enter the join code for your table.');
+      setErrorMsg('Please enter the room code for your table.');
       return;
     }
 
@@ -737,7 +737,7 @@ export const PlayerApp: React.FC = () => {
           </h2>
           <p className="text-xs font-semibold text-ink-500 mb-5">
             {joinStep === 'codes'
-              ? "Enter your table's join code to see your live hand."
+              ? "Enter your table's room code to see your live hand."
               : `New at table ${roomCode} — tell your host who is joining them.`}
           </p>
 
@@ -752,7 +752,7 @@ export const PlayerApp: React.FC = () => {
             <form onSubmit={handleCodesSubmit} className="space-y-4" autoComplete="off">
               <div>
                 <label className="field-label">
-                  Join code <span className="text-pip-red">*</span>
+                  Room code <span className="text-pip-red">*</span>
                 </label>
                 <input
                   type="text"
@@ -949,7 +949,11 @@ export const PlayerApp: React.FC = () => {
       {/* App Header */}
       <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <Standee name={joinedPlayer.name} size="md" />
+          <Standee
+            name={joinedPlayer.name}
+            size="md"
+            imageSrc={joinedPlayer.avatar_path ? getAvatarUrl(joinedPlayer.avatar_path) : undefined}
+          />
           <div className="min-w-0">
             <h2 className="font-display text-base font-extrabold text-ink-800 leading-tight truncate">
               {joinedPlayer.name}
