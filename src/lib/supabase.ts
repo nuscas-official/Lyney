@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { AVATAR_EXTENSIONS, FALLBACK_AVATARS } from './profile';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || 'mock-key';
@@ -39,4 +40,42 @@ export async function ensureAuthSession(): Promise<string> {
     );
   }
   return data.session.user.id;
+}
+
+/** Resolve a stored avatar_path to something an <img> can load. Paths that
+ *  already look like URLs -- the bundled fallbacks, or an absolute link --
+ *  are passed through untouched. */
+export function getAvatarUrl(avatarPath: string): string {
+  if (!avatarPath) return '';
+  if (isDemoMode || avatarPath.startsWith('/') || avatarPath.startsWith('http')) {
+    return avatarPath;
+  }
+  const { data } = supabase.storage.from('avatars').getPublicUrl(avatarPath);
+  return data.publicUrl;
+}
+
+/** The icons on offer in the join form: whatever the host has put in the
+ *  avatars bucket. Uploading a file there is the whole workflow for adding
+ *  one, so this is read fresh rather than baked into the build. An empty or
+ *  unreachable bucket falls back to the bundled pair instead of leaving the
+ *  player with nothing to pick. */
+export async function listAvatarPaths(): Promise<string[]> {
+  if (isDemoMode) return FALLBACK_AVATARS;
+
+  try {
+    const { data, error } = await supabase.storage.from('avatars').list('', {
+      limit: 100,
+      sortBy: { column: 'name', order: 'asc' },
+    });
+    if (error) throw error;
+
+    const files = (data ?? [])
+      .map((f) => f.name)
+      .filter((name) => AVATAR_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext)));
+
+    return files.length > 0 ? files : FALLBACK_AVATARS;
+  } catch (err) {
+    console.error('Could not list avatars:', err);
+    return FALLBACK_AVATARS;
+  }
 }

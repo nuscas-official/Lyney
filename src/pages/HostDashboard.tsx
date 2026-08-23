@@ -3,7 +3,7 @@ import {
   Shield, Users, Layers, RotateCcw, Plus, Trash2,
   UserX, UserCheck, RefreshCw, Sliders, X, Zap,
 } from 'lucide-react';
-import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
+import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl } from '../lib/supabase';
 import { Token, Standee, PaperChip, BoardHeading } from '../components/BoardBits';
 import { Card, CardKind, DrawPool } from '../types/database';
 import {
@@ -29,6 +29,11 @@ interface HostPlayer {
   name: string;
   player_code: string;
   active: boolean;
+  /** From the join form. Null for players seated before profiles existed. */
+  codename?: string | null;
+  race?: string | null;
+  reason?: string | null;
+  avatar_path?: string | null;
   hand: Array<{
     held_card_id: string;
     card_id: string;
@@ -51,10 +56,14 @@ interface RoomEvent {
 }
 
 const INITIAL_DEMO_PLAYERS: HostPlayer[] = [
-  { id: 'p1', name: 'Alex Morgan', player_code: 'K7M-4QP', active: true, hand: [
+  { id: 'p1', name: 'Alex Morgan', player_code: 'K7M-4QP', active: true,
+    codename: 'The 12th', race: 'Primogem', reason: 'I need a part-time job',
+    avatar_path: '/images/lyney.webp', hand: [
     { held_card_id: 'h1', card_id: 'c1', title: 'Shield of Faith', image_path: INITIAL_DEMO_CARDS[0].image_path, source: 'draw' }
   ], hasActedInWindow: true },
-  { id: 'p2', name: 'Jordan Lee', player_code: '9X2-B7L', active: true, hand: [], hasActedInWindow: false },
+  { id: 'p2', name: 'Jordan Lee', player_code: '9X2-B7L', active: true,
+    codename: 'The Understudy', race: 'Human', reason: 'Mom told me to give it a try',
+    avatar_path: '/images/lynette.webp', hand: [], hasActedInWindow: false },
   { id: 'p3', name: 'Sam Taylor', player_code: 'R4W-8TN', active: true, hand: [
     { held_card_id: 'h3', card_id: 'c2', title: 'Phoenix Flame', image_path: INITIAL_DEMO_CARDS[1].image_path, source: 'grant' }
   ], hasActedInWindow: true }
@@ -144,6 +153,10 @@ export const HostDashboard: React.FC = () => {
           name: p.name,
           player_code: p.player_code,
           active: p.active,
+          codename: p.codename ?? null,
+          race: p.race ?? null,
+          reason: p.reason ?? null,
+          avatar_path: p.avatar_path ?? null,
           hand: playerHeld,
           hasActedInWindow: playerPending.length === 0,
         };
@@ -1052,7 +1065,12 @@ export const HostDashboard: React.FC = () => {
                         {/* Player Row Header */}
                         <div className="flex items-start justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <Standee name={player.name} size="sm" muted={!player.active} />
+                            <Standee
+                              name={player.name}
+                              size="sm"
+                              muted={!player.active}
+                              imageSrc={player.avatar_path ? getAvatarUrl(player.avatar_path) : undefined}
+                            />
                             <div className="min-w-0">
                               <h4 className="font-display text-sm font-extrabold text-ink-800 truncate flex items-center gap-1.5">
                                 {player.name}
@@ -1063,6 +1081,11 @@ export const HostDashboard: React.FC = () => {
                                 )}
                               </h4>
                               <p className="text-[11px] code-stamp">{player.player_code}</p>
+                              {(player.codename || player.race) && (
+                                <p className="text-[11px] font-semibold text-ink-500 truncate">
+                                  {[player.codename, player.race].filter(Boolean).join(' · ')}
+                                </p>
+                              )}
                             </div>
                           </div>
 

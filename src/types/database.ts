@@ -35,6 +35,12 @@ export interface Player {
   removed_at?: string | null;
   last_seen: string;
   created_at: string;
+  /** Chosen on the join form. Null for players seated before profiles existed. */
+  race?: string | null;
+  codename?: string | null;
+  reason?: string | null;
+  /** Object name in the `avatars` bucket, or a bundled fallback path. */
+  avatar_path?: string | null;
 }
 
 export interface HeldCard {

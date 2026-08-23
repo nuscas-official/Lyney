@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
   Trash2, X, Copy, ShieldAlert, ArrowLeft, ArrowRight, Plus, Minus, LogOut, Zap,
+  ChevronDown, Check,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
-import { supabase, isDemoMode, ensureAuthSession } from '../lib/supabase';
+import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl, listAvatarPaths } from '../lib/supabase';
 import { CardKind, DrawPool, EventDraw, HeldCard } from '../types/database';
+import { CODENAME_OPTIONS, RACE_OPTIONS, REASON_OPTIONS } from '../lib/profile';
 import {
   DRAW_POOLS, KIND_LABEL, POOL_BUTTON, POOL_DRAW_PHRASE, POOL_KINDS, POOL_LABEL, POOL_TONE,
   normalisePool,
@@ -29,6 +31,27 @@ const DEMO_CARDS: Array<{ id: string; title: string; image_path: string; kind: C
 // The rejoin codes the demo build pretends to know about.
 const DEMO_REJOIN_CODES = ['K7M4QP', 'K7M-4QP', 'DEMO12'];
 
+/** Everything the information collection form asks a new player for. */
+interface NewPlayerProfile {
+  name: string;
+  race: string;
+  codename: string;
+  reason: string;
+  avatarPath: string;
+}
+
+/** The first unanswered question on the form, phrased as a prompt, or null
+ *  once the whole thing is filled in. Drives both the submit button's
+ *  disabled state and the message shown if a keyboard submit slips past it. */
+const missingProfileField = (profile: NewPlayerProfile): string | null => {
+  if (!profile.avatarPath) return 'Pick a profile icon.';
+  if (!profile.name.trim()) return 'Display name is required for new players.';
+  if (!profile.race) return 'Choose a race.';
+  if (!profile.codename) return 'Choose a codename.';
+  if (!profile.reason) return 'Choose a reason for applying.';
+  return null;
+};
+
 // enter_room's failures, phrased for the person holding the phone.
 const joinErrorMessage = (error: { code?: string; message: string }): string => {
   if (error.code === 'P0003' || error.message.includes('invalid_player_code')) {
@@ -39,6 +62,9 @@ const joinErrorMessage = (error: { code?: string; message: string }): string => 
   }
   if (error.code === 'P0006' || error.message.includes('player_removed')) {
     return 'Your host removed you from this table.';
+  }
+  if (error.code === 'P0027' || error.message.includes('profile_required')) {
+    return 'Please fill in every part of the form before submitting.';
   }
   if (error.code === 'P0018' || error.message.includes('name_taken')) {
     return 'Someone in this room is already using that name. Please pick another one.';
@@ -51,11 +77,59 @@ const joinErrorMessage = (error: { code?: string; message: string }): string => 
 const isNameRequired = (error: { code?: string; message: string }): boolean =>
   error.code === 'P0005' || error.message.includes('name_required');
 
+/** One dropdown on the information collection form. A native select rather
+ *  than a styled menu: it is the control phones already know how to open, and
+ *  the option lists are long enough that a hand-rolled popover would be one
+ *  more thing to get wrong on a small screen. */
+const SelectField: React.FC<{
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  options: readonly string[];
+}> = ({ label, value, onChange, placeholder, options }) => (
+  <div>
+    <label className="field-label">
+      {label} <span className="text-pip-red">*</span>
+    </label>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`field appearance-none pr-11 cursor-pointer ${value ? '' : 'text-ink-400/70'}`}
+        required
+      >
+        <option value="" disabled>
+          {placeholder}
+        </option>
+        {options.map((option) => (
+          <option key={option} value={option} className="text-ink-800">
+            {option}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="w-4 h-4 text-ink-400 absolute right-4 top-4 pointer-events-none"
+        strokeWidth={2.75}
+      />
+    </div>
+  </div>
+);
+
 export const PlayerApp: React.FC = () => {
   // Session & Player state
   const [roomCode, setRoomCode] = useState('');
   const [rejoinCodeInput, setRejoinCodeInput] = useState('');
   const [playerName, setPlayerName] = useState('');
+  // The rest of the information collection form. Every one of these is
+  // required of a new player, so they start empty rather than pre-picked --
+  // a pre-picked race is one nobody chose but everybody submits.
+  const [playerRace, setPlayerRace] = useState('');
+  const [playerCodename, setPlayerCodename] = useState('');
+  const [playerReason, setPlayerReason] = useState('');
+  const [avatarPath, setAvatarPath] = useState('');
+  const [avatarChoices, setAvatarChoices] = useState<string[]>([]);
+  const [avatarsLoading, setAvatarsLoading] = useState(false);
   // The join screen asks for codes first and only asks for a name once the
   // codes say this is somebody the room has never seen.
   const [joinStep, setJoinStep] = useState<'codes' | 'name'>('codes');
@@ -65,6 +139,8 @@ export const PlayerApp: React.FC = () => {
     name: string;
     player_code: string;
     room_code: string;
+    avatar_path?: string | null;
+    codename?: string | null;
   } | null>(null);
 
   // App UI state
@@ -119,6 +195,29 @@ export const PlayerApp: React.FC = () => {
     }
   }, []);
 
+  // The icons on offer are whatever is in the avatars bucket, so they are
+  // fetched when the form opens rather than at boot -- a returning player
+  // goes straight from the codes screen to their hand and never needs them.
+  useEffect(() => {
+    if (joinStep !== 'name' || avatarChoices.length > 0) return;
+
+    let cancelled = false;
+    setAvatarsLoading(true);
+    listAvatarPaths()
+      .then((paths) => {
+        if (cancelled) return;
+        setAvatarChoices(paths);
+        // Nothing is pre-selected: picking an icon is part of the form.
+      })
+      .finally(() => {
+        if (!cancelled) setAvatarsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [joinStep, avatarChoices.length]);
+
   // Leave / Reset Room Session
   const handleLeaveRoom = () => {
     localStorage.removeItem('lyney_player_session');
@@ -126,6 +225,10 @@ export const PlayerApp: React.FC = () => {
     setJoinStep('codes');
     setRejoinCodeInput('');
     setPlayerName('');
+    setPlayerRace('');
+    setPlayerCodename('');
+    setPlayerReason('');
+    setAvatarPath('');
     setHand([]);
     setRevealedEvent(null);
     setLastEvent(null);
@@ -323,12 +426,18 @@ export const PlayerApp: React.FC = () => {
     setIsPreloading(false);
   };
 
-  // The enter_room call behind both join steps.
-  const submitJoin = async (cleanRoom: string, cleanRejoin: string, name: string) => {
+  // The enter_room call behind both join steps. A rejoin sends codes alone --
+  // the server ignores profile arguments for a player it already knows, and
+  // the returning player was never asked for them.
+  const submitJoin = async (cleanRoom: string, cleanRejoin: string, profile?: NewPlayerProfile) => {
     const { data, error } = await supabase.rpc('enter_room', {
       p_room_code: cleanRoom,
       p_player_code: cleanRejoin || null,
-      p_name: name || null,
+      p_name: profile?.name || null,
+      p_race: profile?.race || null,
+      p_codename: profile?.codename || null,
+      p_reason: profile?.reason || null,
+      p_avatar_path: profile?.avatarPath || null,
     });
 
     if (error) {
@@ -345,12 +454,14 @@ export const PlayerApp: React.FC = () => {
   };
 
   // Demo mode has no server to ask, so it seats whoever turns up.
-  const finishDemoJoin = (cleanRoom: string, cleanRejoin: string, name: string) => {
+  const finishDemoJoin = (cleanRoom: string, cleanRejoin: string, profile?: NewPlayerProfile) => {
     const playerObj = {
       id: 'p-100',
-      name: name || 'Player One',
+      name: profile?.name || 'Player One',
       player_code: cleanRejoin || 'K7M4QP',
       room_code: cleanRoom,
+      avatar_path: profile?.avatarPath ?? null,
+      codename: profile?.codename ?? null,
     };
 
     setJoinedPlayer(playerObj);
@@ -384,7 +495,7 @@ export const PlayerApp: React.FC = () => {
         setErrorMsg("That rejoin code isn't valid for this room.");
         return;
       }
-      finishDemoJoin(cleanRoom, cleanRejoin, '');
+      finishDemoJoin(cleanRoom, cleanRejoin);
       return;
     }
 
@@ -393,7 +504,7 @@ export const PlayerApp: React.FC = () => {
       await ensureAuthSession();
 
       if (cleanRejoin) {
-        await submitJoin(cleanRoom, cleanRejoin, '');
+        await submitJoin(cleanRoom, cleanRejoin);
         return;
       }
 
@@ -420,28 +531,40 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
-  // Step 2 of the join: the name, reached only by a join code with no rejoin
-  // code -- that is, by a player this room has never seated before.
-  const handleNameSubmit = async (e: React.FormEvent) => {
+  // Step 2 of the join: the information collection form, reached only by a
+  // join code with no rejoin code -- that is, by a player this room has never
+  // seated before. Everything here is asked once and kept; a returning player
+  // never sees this screen.
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
     const cleanRoom = roomCode.trim().toUpperCase();
+    const profile: NewPlayerProfile = {
+      name: playerName.trim(),
+      race: playerRace,
+      codename: playerCodename,
+      reason: playerReason,
+      avatarPath: avatarPath,
+    };
 
-    if (!playerName.trim()) {
-      setErrorMsg('Display name is required for new players.');
+    // The submit button is disabled until the form is complete, so this only
+    // catches a keyboard submit that got past it.
+    const missing = missingProfileField(profile);
+    if (missing) {
+      setErrorMsg(missing);
       return;
     }
 
     if (isDemoMode) {
-      finishDemoJoin(cleanRoom, '', playerName.trim());
+      finishDemoJoin(cleanRoom, '', profile);
       return;
     }
 
     setIsJoining(true);
     try {
       await ensureAuthSession();
-      await submitJoin(cleanRoom, '', playerName.trim());
+      await submitJoin(cleanRoom, '', profile);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to enter room.');
     } finally {
@@ -449,7 +572,7 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
-  // Back out of the name screen to the codes.
+  // Back out of the form to the codes.
   const handleBackToCodes = () => {
     setErrorMsg(null);
     setJoinStep('codes');
@@ -610,12 +733,12 @@ export const PlayerApp: React.FC = () => {
         {/* Join Card Form */}
         <div className="w-full max-w-md panel taped p-6 sm:p-7 pt-8">
           <h2 className="font-display text-2xl font-extrabold text-ink-800 mb-1">
-            {joinStep === 'codes' ? 'Take your seat' : 'Name your seat'}
+            {joinStep === 'codes' ? 'Take your seat' : 'Information Collection Form'}
           </h2>
           <p className="text-xs font-semibold text-ink-500 mb-5">
             {joinStep === 'codes'
               ? "Enter your table's join code to see your live hand."
-              : `New at table ${roomCode} — this is the name your host will see.`}
+              : `New at table ${roomCode} — tell your host who is joining them.`}
           </p>
 
           {errorMsg && (
@@ -685,10 +808,50 @@ export const PlayerApp: React.FC = () => {
               </button>
             </form>
           ) : (
-            <form onSubmit={handleNameSubmit} className="space-y-4" autoComplete="off">
+            <form onSubmit={handleProfileSubmit} className="space-y-4" autoComplete="off">
+              {/* Profile icon: the host's uploaded set, laid out like pieces
+                  waiting to be picked off the edge of the board. */}
               <div>
                 <label className="field-label">
-                  Your name <span className="text-pip-red">*</span>
+                  Profile icon <span className="text-pip-red">*</span>
+                </label>
+                {avatarsLoading ? (
+                  <p className="text-xs font-semibold text-ink-400 py-3">Laying out the pieces…</p>
+                ) : (
+                  <div className="flex flex-wrap gap-3 py-1">
+                    {avatarChoices.map((path) => {
+                      const selected = avatarPath === path;
+                      return (
+                        <button
+                          key={path}
+                          type="button"
+                          onClick={() => setAvatarPath(path)}
+                          title={path}
+                          aria-pressed={selected}
+                          className={`relative rounded-full transition-transform ${
+                            selected ? 'scale-105' : 'hover:scale-105 opacity-80 hover:opacity-100'
+                          }`}
+                        >
+                          <Token
+                            tone={selected ? 'crimson' : 'paper'}
+                            size="lg"
+                            imageSrc={getAvatarUrl(path)}
+                          />
+                          {selected && (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-crimson-500 border-[2.5px] border-white flex items-center justify-center">
+                              <Check className="w-3 h-3 text-white" strokeWidth={4} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="field-label">
+                  Name <span className="text-pip-red">*</span>
                 </label>
                 <div className="relative">
                   <input
@@ -707,12 +870,42 @@ export const PlayerApp: React.FC = () => {
                 </div>
               </div>
 
+              <SelectField
+                label="Race"
+                value={playerRace}
+                onChange={setPlayerRace}
+                placeholder="Select your race…"
+                options={RACE_OPTIONS}
+              />
+
+              <SelectField
+                label="Codename"
+                value={playerCodename}
+                onChange={setPlayerCodename}
+                placeholder="Select a codename…"
+                options={CODENAME_OPTIONS}
+              />
+
+              <SelectField
+                label="Reason for Application"
+                value={playerReason}
+                onChange={setPlayerReason}
+                placeholder="My reason for joining the organization is…"
+                options={REASON_OPTIONS}
+              />
+
               <button
                 type="submit"
-                disabled={isJoining}
+                disabled={isJoining || missingProfileField({
+                  name: playerName,
+                  race: playerRace,
+                  codename: playerCodename,
+                  reason: playerReason,
+                  avatarPath,
+                }) !== null}
                 className="btn-crimson w-full !py-4 text-base mt-1 disabled:opacity-60"
               >
-                Enter room <ArrowRight className="w-4 h-4" strokeWidth={3} />
+                Confirm submission <ArrowRight className="w-4 h-4" strokeWidth={3} />
               </button>
 
               <button

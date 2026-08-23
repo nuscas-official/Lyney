@@ -89,19 +89,34 @@ interface StandeeProps {
   size?: 'sm' | 'md' | 'lg';
   muted?: boolean;
   className?: string;
+  /** The player's chosen profile icon. Falls back to their initial, which is
+   *  all there is for players seated before the form asked for one. */
+  imageSrc?: string;
 }
 
-/** A player's piece: initial on a colored disc inside a thick white ring,
- *  mirroring the character portraits ringed around the board. */
-export const Standee: React.FC<StandeeProps> = ({ name, size = 'md', muted, className = '' }) => {
+/** A player's piece: their icon, or their initial on a colored disc, inside a
+ *  thick white ring -- mirroring the character portraits ringed around the
+ *  board. */
+export const Standee: React.FC<StandeeProps> = ({
+  name,
+  size = 'md',
+  muted,
+  className = '',
+  imageSrc,
+}) => {
   const s = SIZE[size === 'lg' ? 'lg' : size];
   const initial = (name || '?').trim().charAt(0).toUpperCase();
   return (
     <span
-      className={`token ${toneForName(name)} ${s.box} ${size === 'lg' ? 'text-xl' : 'text-base'}
+      className={`token ${imageSrc ? 'bg-parchment-100' : toneForName(name)} ${s.box}
+                  ${size === 'lg' ? 'text-xl' : 'text-base'} overflow-hidden
                   ${muted ? 'grayscale opacity-60' : ''} ${className}`}
     >
-      {initial}
+      {imageSrc ? (
+        <img src={imageSrc} alt="" className="w-full h-full object-cover rounded-full" />
+      ) : (
+        initial
+      )}
     </span>
   );
 };
