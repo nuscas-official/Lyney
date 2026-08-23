@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
-  Trash2, X, Copy, ShieldAlert, ArrowRight, Plus, Minus, LogOut, Zap,
+  Trash2, X, Copy, ShieldAlert, ArrowLeft, ArrowRight, Plus, Minus, LogOut, Zap,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
@@ -26,11 +26,40 @@ const DEMO_CARDS: Array<{ id: string; title: string; image_path: string; kind: C
   { id: '4', title: 'Shadow Cloak', image_path: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80', kind: 'event' }
 ];
 
+// The rejoin codes the demo build pretends to know about.
+const DEMO_REJOIN_CODES = ['K7M4QP', 'K7M-4QP', 'DEMO12'];
+
+// enter_room's failures, phrased for the person holding the phone.
+const joinErrorMessage = (error: { code?: string; message: string }): string => {
+  if (error.code === 'P0003' || error.message.includes('invalid_player_code')) {
+    return "That rejoin code isn't valid for this room.";
+  }
+  if (error.code === 'P0004' || error.message.includes('room_not_found')) {
+    return 'No table is using that join code. Check it with your host.';
+  }
+  if (error.code === 'P0006' || error.message.includes('player_removed')) {
+    return 'Your host removed you from this table.';
+  }
+  if (error.code === 'P0018' || error.message.includes('name_taken')) {
+    return 'Someone in this room is already using that name. Please pick another one.';
+  }
+  return error.message;
+};
+
+// name_required is enter_room's way of saying "the room is real, but this is
+// a new player" -- which is exactly the answer the codes screen is after.
+const isNameRequired = (error: { code?: string; message: string }): boolean =>
+  error.code === 'P0005' || error.message.includes('name_required');
+
 export const PlayerApp: React.FC = () => {
   // Session & Player state
   const [roomCode, setRoomCode] = useState('');
   const [rejoinCodeInput, setRejoinCodeInput] = useState('');
   const [playerName, setPlayerName] = useState('');
+  // The join screen asks for codes first and only asks for a name once the
+  // codes say this is somebody the room has never seen.
+  const [joinStep, setJoinStep] = useState<'codes' | 'name'>('codes');
+  const [isJoining, setIsJoining] = useState(false);
   const [joinedPlayer, setJoinedPlayer] = useState<{
     id: string;
     name: string;
@@ -94,6 +123,9 @@ export const PlayerApp: React.FC = () => {
   const handleLeaveRoom = () => {
     localStorage.removeItem('lyney_player_session');
     setJoinedPlayer(null);
+    setJoinStep('codes');
+    setRejoinCodeInput('');
+    setPlayerName('');
     setHand([]);
     setRevealedEvent(null);
     setLastEvent(null);
@@ -291,8 +323,47 @@ export const PlayerApp: React.FC = () => {
     setIsPreloading(false);
   };
 
-  // Join or Rejoin Room submit
-  const handleJoin = async (e: React.FormEvent) => {
+  // The enter_room call behind both join steps.
+  const submitJoin = async (cleanRoom: string, cleanRejoin: string, name: string) => {
+    const { data, error } = await supabase.rpc('enter_room', {
+      p_room_code: cleanRoom,
+      p_player_code: cleanRejoin || null,
+      p_name: name || null,
+    });
+
+    if (error) {
+      setErrorMsg(joinErrorMessage(error));
+      return;
+    }
+
+    const pData = data.player;
+    setJoinedPlayer(pData);
+    setHand(data.hand || []);
+    setLastEvent(data.last_event ?? null);
+    localStorage.setItem('lyney_player_session', JSON.stringify({ player: pData }));
+    runPreload();
+  };
+
+  // Demo mode has no server to ask, so it seats whoever turns up.
+  const finishDemoJoin = (cleanRoom: string, cleanRejoin: string, name: string) => {
+    const playerObj = {
+      id: 'p-100',
+      name: name || 'Player One',
+      player_code: cleanRejoin || 'K7M4QP',
+      room_code: cleanRoom,
+    };
+
+    setJoinedPlayer(playerObj);
+    localStorage.setItem('lyney_player_session', JSON.stringify({ player: playerObj }));
+    runPreload();
+  };
+
+  // Step 1 of the join: the codes, and nothing else. A rejoin code identifies
+  // the player on its own, so returning players go straight in and never
+  // retype the name the host already has for them -- retyping it was how the
+  // same person ended up seated twice. Only a join code with no rejoin code
+  // moves on to the name screen.
+  const handleCodesSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -304,61 +375,84 @@ export const PlayerApp: React.FC = () => {
       return;
     }
 
-    if (!cleanRejoin && !playerName.trim()) {
+    if (isDemoMode) {
+      if (!cleanRejoin) {
+        setJoinStep('name');
+        return;
+      }
+      if (!DEMO_REJOIN_CODES.includes(cleanRejoin)) {
+        setErrorMsg("That rejoin code isn't valid for this room.");
+        return;
+      }
+      finishDemoJoin(cleanRoom, cleanRejoin, '');
+      return;
+    }
+
+    setIsJoining(true);
+    try {
+      await ensureAuthSession();
+
+      if (cleanRejoin) {
+        await submitJoin(cleanRoom, cleanRejoin, '');
+        return;
+      }
+
+      // No rejoin code: check the join code before asking for a name, so a
+      // mistyped room is caught on the screen that owns that field rather
+      // than after the player has thought one up. enter_room checks the room
+      // first and answers name_required once it knows the room is real.
+      const { error } = await supabase.rpc('enter_room', {
+        p_room_code: cleanRoom,
+        p_player_code: null,
+        p_name: null,
+      });
+
+      if (error && !isNameRequired(error)) {
+        setErrorMsg(joinErrorMessage(error));
+        return;
+      }
+
+      setJoinStep('name');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to enter room.');
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  // Step 2 of the join: the name, reached only by a join code with no rejoin
+  // code -- that is, by a player this room has never seated before.
+  const handleNameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    const cleanRoom = roomCode.trim().toUpperCase();
+
+    if (!playerName.trim()) {
       setErrorMsg('Display name is required for new players.');
       return;
     }
 
     if (isDemoMode) {
-      // Mock validation logic
-      if (cleanRejoin && cleanRejoin !== 'K7M4QP' && cleanRejoin !== 'K7M-4QP' && cleanRejoin !== 'DEMO12') {
-        setErrorMsg("That rejoin code isn't valid for this room.");
-        return;
-      }
-
-      const playerObj = {
-        id: 'p-100',
-        name: playerName || 'Player One',
-        player_code: cleanRejoin || 'K7M4QP',
-        room_code: cleanRoom,
-      };
-
-      setJoinedPlayer(playerObj);
-      localStorage.setItem('lyney_player_session', JSON.stringify({ player: playerObj }));
-      runPreload();
+      finishDemoJoin(cleanRoom, '', playerName.trim());
       return;
     }
 
-    // Real Supabase join RPC call
+    setIsJoining(true);
     try {
       await ensureAuthSession();
-
-      const { data, error } = await supabase.rpc('enter_room', {
-        p_room_code: cleanRoom,
-        p_player_code: cleanRejoin || null,
-        p_name: playerName.trim() || null,
-      });
-
-      if (error) {
-        if (error.code === 'P0003') {
-          setErrorMsg("That rejoin code isn't valid for this room.");
-        } else if (error.code === 'P0018' || error.message.includes('name_taken')) {
-          setErrorMsg('Someone in this room is already using that name. Please pick another one.');
-        } else {
-          setErrorMsg(error.message);
-        }
-        return;
-      }
-
-      const pData = data.player;
-      setJoinedPlayer(pData);
-      setHand(data.hand || []);
-      setLastEvent(data.last_event ?? null);
-      localStorage.setItem('lyney_player_session', JSON.stringify({ player: pData }));
-      runPreload();
+      await submitJoin(cleanRoom, '', playerName.trim());
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to enter room.');
+    } finally {
+      setIsJoining(false);
     }
+  };
+
+  // Back out of the name screen to the codes.
+  const handleBackToCodes = () => {
+    setErrorMsg(null);
+    setJoinStep('codes');
   };
 
   // Perform Draw Action
@@ -515,9 +609,13 @@ export const PlayerApp: React.FC = () => {
 
         {/* Join Card Form */}
         <div className="w-full max-w-md panel taped p-6 sm:p-7 pt-8">
-          <h2 className="font-display text-2xl font-extrabold text-ink-800 mb-1">Take your seat</h2>
+          <h2 className="font-display text-2xl font-extrabold text-ink-800 mb-1">
+            {joinStep === 'codes' ? 'Take your seat' : 'Name your seat'}
+          </h2>
           <p className="text-xs font-semibold text-ink-500 mb-5">
-            Enter your table's join code to see your live hand.
+            {joinStep === 'codes'
+              ? "Enter your table's join code to see your live hand."
+              : `New at table ${roomCode} — this is the name your host will see.`}
           </p>
 
           {errorMsg && (
@@ -527,54 +625,67 @@ export const PlayerApp: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleJoin} className="space-y-4" autoComplete="off">
-            <div>
-              <label className="field-label">
-                Join code <span className="text-pip-red">*</span>
-              </label>
-              <input
-                type="text"
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="e.g. 9X2B7L"
-                className="field uppercase"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                data-1p-ignore
-                data-lpignore="true"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="field-label">
-                Rejoin code{' '}
-                <span className="normal-case tracking-normal text-ink-400 font-semibold">
-                  (returning players)
-                </span>
-              </label>
-              <div className="relative">
+          {joinStep === 'codes' ? (
+            <form onSubmit={handleCodesSubmit} className="space-y-4" autoComplete="off">
+              <div>
+                <label className="field-label">
+                  Join code <span className="text-pip-red">*</span>
+                </label>
                 <input
                   type="text"
-                  value={rejoinCodeInput}
-                  onChange={(e) => setRejoinCodeInput(e.target.value.toUpperCase())}
-                  placeholder="e.g. K7M4QP"
-                  className="field uppercase pr-11"
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. 9X2B7L"
+                  className="field uppercase"
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="characters"
                   spellCheck={false}
                   data-1p-ignore
                   data-lpignore="true"
+                  required
                 />
-                <Key className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
               </div>
-            </div>
 
-            {/* Display name field: required only when rejoin code is empty */}
-            {!rejoinCodeInput.trim() && (
+              <div>
+                <label className="field-label">
+                  Rejoin code{' '}
+                  <span className="normal-case tracking-normal text-ink-400 font-semibold">
+                    (returning players)
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={rejoinCodeInput}
+                    onChange={(e) => setRejoinCodeInput(e.target.value.toUpperCase())}
+                    placeholder="e.g. K7M4QP"
+                    className="field uppercase pr-11"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    data-1p-ignore
+                    data-lpignore="true"
+                  />
+                  <Key className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
+                </div>
+                <p className="mt-2 text-[11px] font-semibold text-ink-400">
+                  First time at this table? Leave this blank — we'll ask for your name next.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isJoining}
+                className="btn-crimson w-full !py-4 text-base mt-1 disabled:opacity-60"
+              >
+                {rejoinCodeInput.trim() ? 'Enter room' : 'Continue'}{' '}
+                <ArrowRight className="w-4 h-4" strokeWidth={3} />
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleNameSubmit} className="space-y-4" autoComplete="off">
               <div>
                 <label className="field-label">
                   Your name <span className="text-pip-red">*</span>
@@ -589,17 +700,30 @@ export const PlayerApp: React.FC = () => {
                     autoComplete="off"
                     data-1p-ignore
                     data-lpignore="true"
+                    autoFocus
                     required
                   />
                   <User className="w-4 h-4 text-ink-400 absolute right-4 top-4" strokeWidth={2.75} />
                 </div>
               </div>
-            )}
 
-            <button type="submit" className="btn-crimson w-full !py-4 text-base mt-1">
-              Enter room <ArrowRight className="w-4 h-4" strokeWidth={3} />
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={isJoining}
+                className="btn-crimson w-full !py-4 text-base mt-1 disabled:opacity-60"
+              >
+                Enter room <ArrowRight className="w-4 h-4" strokeWidth={3} />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBackToCodes}
+                className="btn-paper w-full !py-3 text-sm"
+              >
+                <ArrowLeft className="w-4 h-4" strokeWidth={3} /> Back to codes
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
