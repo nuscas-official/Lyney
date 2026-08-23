@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PlayerApp } from './pages/PlayerApp';
 import { HostDashboard } from './pages/HostDashboard';
 import { Gallery } from './pages/Gallery';
-import { Shield, Smartphone, Images } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 
 type Route = 'play' | 'host' | 'gallery';
 
@@ -12,8 +12,15 @@ const routeForPath = (path: string): Route => {
   return 'play';
 };
 
+const NAV_ITEMS: Array<{ route: Route; label: string }> = [
+  { route: 'play', label: 'Player' },
+  { route: 'host', label: 'Host' },
+  { route: 'gallery', label: 'Gallery' },
+];
+
 export const App: React.FC = () => {
   const [route, setRoute] = useState<Route>('play');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setRoute(routeForPath(window.location.pathname));
@@ -26,54 +33,106 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // The overlay takes over the whole screen, so it gets the same courtesies
+  // as a real menu: Escape closes it, and the board underneath stops
+  // scrolling while it's open.
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [menuOpen]);
+
   const navigateTo = (newRoute: Route) => {
     setRoute(newRoute);
+    setMenuOpen(false);
     const newPath = newRoute === 'host' ? '/host' : newRoute === 'gallery' ? '/gallery' : '/play';
     window.history.pushState({}, '', newPath);
   };
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Universal Top Switcher Bar — styled as the board's dark bezel */}
-      <nav className="bg-ink-900 border-b-[3px] border-ink-900 px-3 py-2 flex items-center justify-center sm:justify-between z-50">
-        <span className="hidden sm:flex items-center gap-2 font-display font-extrabold text-parchment-200 text-sm tracking-tight">
-          <img src="/images/lyney.webp" alt="Lyney" className="w-6 h-6 rounded-full ring-2 ring-white object-cover" />
-          Lyney
-        </span>
+      {/* Floating menu trigger. `fixed` takes it out of the document flow
+          entirely -- there is no bar reserving a strip of the page for it,
+          it just sits on top of whatever the current screen renders, like a
+          token dropped on the board. Hidden while the overlay is open so it
+          doesn't double up with the overlay's own close button in the same
+          corner. */}
+      {!menuOpen && (
+        <button
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Open menu"
+          aria-haspopup="true"
+          aria-expanded={menuOpen}
+          className="fixed top-3 right-3 z-50 w-11 h-11 rounded-full bg-ink-900 text-parchment-100
+                     ring-[3px] ring-white shadow-token flex items-center justify-center
+                     transition-transform hover:scale-105 active:scale-95"
+        >
+          <Menu className="w-5 h-5" strokeWidth={2.75} />
+        </button>
+      )}
 
-        <div className="flex items-center gap-1 p-1 rounded-2xl bg-ink-800 border-[2.5px] border-ink-700">
+      {/* Nav Overlay — one dark screen, centered, over everything. */}
+      {menuOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-1
+                     bg-ink-900/95 backdrop-blur-sm px-6 animate-pop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMenuOpen(false);
+          }}
+        >
           <button
-            onClick={() => navigateTo('play')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-display font-bold text-xs transition-colors ${
-              route === 'play'
-                ? 'bg-pip-cyan text-ink-900 shadow-sticker-sm'
-                : 'text-parchment-200/70 hover:text-parchment-100'
-            }`}
+            type="button"
+            onClick={() => setMenuOpen(false)}
+            aria-label="Close menu"
+            className="fixed top-3 right-3 w-11 h-11 rounded-full bg-crimson-500 text-parchment-50
+                       ring-[3px] ring-white shadow-token flex items-center justify-center
+                       transition-transform hover:scale-105 active:scale-95"
           >
-            <img src="/images/lyney.webp" alt="" className="w-4 h-4 rounded-full object-cover" /> Player
+            <X className="w-5 h-5" strokeWidth={3} />
           </button>
-          <button
-            onClick={() => navigateTo('host')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-display font-bold text-xs transition-colors ${
-              route === 'host'
-                ? 'bg-pip-gold text-ink-900 shadow-sticker-sm'
-                : 'text-parchment-200/70 hover:text-parchment-100'
-            }`}
-          >
-            <img src="/images/lynette.webp" alt="" className="w-4 h-4 rounded-full object-cover" /> Host
-          </button>
-          <button
-            onClick={() => navigateTo('gallery')}
-            className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-display font-bold text-xs transition-colors ${
-              route === 'gallery'
-                ? 'bg-pip-violet text-white shadow-sticker-sm'
-                : 'text-parchment-200/70 hover:text-parchment-100'
-            }`}
-          >
-            <Images className="w-4 h-4" strokeWidth={2.75} /> Gallery
-          </button>
+
+          <span className="font-display font-bold text-xs uppercase tracking-[0.3em] text-parchment-200/50 mb-3">
+            Lyney Menu
+          </span>
+
+          <nav className="flex flex-col items-center">
+            {NAV_ITEMS.map((item) => {
+              const active = route === item.route;
+              return (
+                <button
+                  key={item.route}
+                  type="button"
+                  onClick={() => navigateTo(item.route)}
+                  aria-current={active ? 'page' : undefined}
+                  className={`font-display font-extrabold uppercase tracking-tight leading-[1.15]
+                              text-5xl sm:text-6xl py-1.5 transition-colors
+                              ${active
+                                ? 'text-pip-gold'
+                                : 'text-parchment-100 hover:text-pip-cyan'}`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <p className="mt-8 font-display font-bold text-[11px] uppercase tracking-[0.2em] text-parchment-200/30">
+            Card companion · NUSCASuals
+          </p>
         </div>
-      </nav>
+      )}
 
       {/* Render Current Route */}
       {route === 'host' ? <HostDashboard /> : route === 'gallery' ? <Gallery /> : <PlayerApp />}

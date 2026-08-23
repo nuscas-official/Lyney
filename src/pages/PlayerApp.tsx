@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
   Trash2, X, Copy, ShieldAlert, ArrowLeft, ArrowRight, Plus, Minus, LogOut, Zap,
-  ChevronDown, Check,
+  ChevronDown, Check, Hash,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
@@ -162,7 +162,10 @@ export const PlayerApp: React.FC = () => {
   const [lastEvent, setLastEvent] = useState<EventDraw | null>(null);
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [isRemoved, setIsRemoved] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedField, setCopiedField] = useState<'rejoin' | 'room' | null>(null);
+  // The host-set table name ("Table 3"), shown next to the room code. Comes
+  // back from enter_room alongside the player, not from the join form.
+  const [roomLabel, setRoomLabel] = useState('');
 
   const pendingDrawCount = pendingDrawPools.length;
   const nextDrawPool: DrawPool = pendingDrawPools[0] ?? 'mixed';
@@ -222,6 +225,7 @@ export const PlayerApp: React.FC = () => {
   const handleLeaveRoom = () => {
     localStorage.removeItem('lyney_player_session');
     setJoinedPlayer(null);
+    setRoomLabel('');
     setJoinStep('codes');
     setRejoinCodeInput('');
     setPlayerName('');
@@ -324,6 +328,19 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
+  // The host-set table name. enter_room doesn't carry it -- it only knows the
+  // player -- so it's a separate, one-off read straight off the rooms table
+  // (label only; host_pin is never selected).
+  const fetchRoomLabel = async (rCode: string) => {
+    if (isDemoMode) return;
+    try {
+      const { data, error } = await supabase.from('rooms').select('label').eq('code', rCode).maybeSingle();
+      if (!error && data?.label) setRoomLabel(data.label);
+    } catch (err) {
+      console.error('Error fetching room label:', err);
+    }
+  };
+
   // Realtime Subscription for Player
   //
   // The player never acts on their own screen except to draw and discard, so
@@ -362,6 +379,7 @@ export const PlayerApp: React.FC = () => {
       if (cancelled) return;
 
       refresh();
+      fetchRoomLabel(room_code);
 
       channel = supabase
         .channel(`player_realtime_${id}`)
@@ -450,6 +468,7 @@ export const PlayerApp: React.FC = () => {
     setHand(data.hand || []);
     setLastEvent(data.last_event ?? null);
     localStorage.setItem('lyney_player_session', JSON.stringify({ player: pData }));
+    fetchRoomLabel(pData.room_code);
     runPreload();
   };
 
@@ -465,6 +484,7 @@ export const PlayerApp: React.FC = () => {
     };
 
     setJoinedPlayer(playerObj);
+    setRoomLabel('Demo Table');
     localStorage.setItem('lyney_player_session', JSON.stringify({ player: playerObj }));
     runPreload();
   };
@@ -684,12 +704,10 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
-  const copyRejoinCode = () => {
-    if (joinedPlayer) {
-      navigator.clipboard.writeText(joinedPlayer.player_code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+  const copyCode = (field: 'rejoin' | 'room', value: string) => {
+    navigator.clipboard.writeText(value);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField((current) => (current === field ? null : current)), 2000);
   };
 
   // Render Removed State Screen
@@ -946,31 +964,67 @@ export const PlayerApp: React.FC = () => {
         </div>
       )}
 
-      {/* App Header */}
-      <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 py-3 flex items-center justify-between gap-3">
+      {/* App Header. Right-padded past px-4 so its content clears the
+          floating hamburger button (fixed top-3 right-3, ~56px footprint)
+          instead of sitting under it. */}
+      <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 pl-4 pr-16 py-3 flex items-center justify-between gap-3">
+        {/* Left: who you are -- avatar, name, and a tap-to-copy chip for the
+            code that gets you back here if this device loses the session. */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <Standee
-            name={joinedPlayer.name}
-            size="md"
-            imageSrc={joinedPlayer.avatar_path ? getAvatarUrl(joinedPlayer.avatar_path) : undefined}
-          />
+          <button
+            type="button"
+            onClick={() => setShowCodeModal(true)}
+            title="View rejoin code"
+            className="shrink-0"
+          >
+            <Standee
+              name={joinedPlayer.name}
+              size="md"
+              imageSrc={joinedPlayer.avatar_path ? getAvatarUrl(joinedPlayer.avatar_path) : undefined}
+            />
+          </button>
           <div className="min-w-0">
             <h2 className="font-display text-base font-extrabold text-ink-800 leading-tight truncate">
               {joinedPlayer.name}
             </h2>
-            <p className="text-[11px] code-stamp">{joinedPlayer.room_code}</p>
+            <button
+              type="button"
+              onClick={() => copyCode('rejoin', joinedPlayer.player_code)}
+              title="Tap to copy your rejoin code"
+              className="chip bg-white code-stamp !text-[11px] mt-1 hover:bg-parchment-100 transition-colors"
+            >
+              {copiedField === 'rejoin' ? (
+                <CheckCircle className="w-3 h-3 text-pip-leaf shrink-0" strokeWidth={2.75} />
+              ) : (
+                <Key className="w-3 h-3 text-crimson-500 shrink-0" strokeWidth={2.75} />
+              )}
+              {joinedPlayer.player_code}
+            </button>
           </div>
         </div>
 
-        {/* Rejoin Code Display Chip */}
-        <button
-          onClick={() => setShowCodeModal(true)}
-          className="btn-paper !py-2 !px-3 !text-xs shrink-0"
-          title="View rejoin code"
-        >
-          <Key className="w-3.5 h-3.5 text-crimson-500" strokeWidth={2.75} />
-          <span className="font-mono">{joinedPlayer.player_code}</span>
-        </button>
+        {/* Right: which table this is -- room name, and a tap-to-copy chip
+            for the code that gets someone else onto it. */}
+        <div className="flex flex-col items-end min-w-0 shrink-0">
+          {roomLabel && (
+            <h2 className="font-display text-base font-extrabold text-ink-800 leading-tight truncate max-w-[8rem]">
+              {roomLabel}
+            </h2>
+          )}
+          <button
+            type="button"
+            onClick={() => copyCode('room', joinedPlayer.room_code)}
+            title="Tap to copy the room code"
+            className="chip bg-white code-stamp !text-[11px] mt-1 hover:bg-parchment-100 transition-colors"
+          >
+            {copiedField === 'room' ? (
+              <CheckCircle className="w-3 h-3 text-pip-leaf shrink-0" strokeWidth={2.75} />
+            ) : (
+              <Hash className="w-3 h-3 text-crimson-500 shrink-0" strokeWidth={2.75} />
+            )}
+            {joinedPlayer.room_code}
+          </button>
+        </div>
       </header>
 
       {/* Main Content: Player Hand */}
@@ -1125,8 +1179,11 @@ export const PlayerApp: React.FC = () => {
               {joinedPlayer.player_code}
             </div>
 
-            <button onClick={copyRejoinCode} className="btn-paper w-full !py-2.5 !text-xs mb-2">
-              {copied ? (
+            <button
+              onClick={() => copyCode('rejoin', joinedPlayer.player_code)}
+              className="btn-paper w-full !py-2.5 !text-xs mb-2"
+            >
+              {copiedField === 'rejoin' ? (
                 <>
                   <CheckCircle className="w-4 h-4 text-pip-leaf" strokeWidth={2.75} /> Copied!
                 </>

@@ -70,7 +70,12 @@ export const Gallery: React.FC = () => {
     <div className="flex-1 flex flex-col">
       {/* App Header */}
       <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 py-3">
-        <div className="max-w-5xl w-full mx-auto flex items-center justify-between gap-3">
+        {/* Right-padded past the row's own gap so the refresh button clears
+            the floating hamburger (fixed top-3 right-3, ~56px footprint) on
+            narrow screens, where max-w-5xl's centering has no slack left.
+            Padding here, not on the header, keeps mx-auto centering true on
+            wide screens. */}
+        <div className="max-w-5xl w-full mx-auto flex items-center justify-between gap-3 pr-12">
           <BoardHeading icon={Images} tone="cyan" title="Card gallery" subtitle="Every card in the deck, at a glance" />
           <button onClick={fetchCards} className="btn-icon shrink-0" title="Refresh" disabled={loading || isDemoMode}>
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} strokeWidth={2.75} />

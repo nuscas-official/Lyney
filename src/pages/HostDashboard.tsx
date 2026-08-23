@@ -806,7 +806,10 @@ export const HostDashboard: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col pb-10">
       {/* Top Header — the cream path running across the top of the board */}
-      <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 px-4 sm:px-6 py-3 space-y-3">
+      {/* Right-padded past the sm:px-6 baseline so the room-code chip clears
+          the floating hamburger button (fixed top-3 right-3, ~56px footprint)
+          instead of sitting under it. */}
+      <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 pl-4 sm:pl-6 pr-16 py-3 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <Token tone="gold" size="md" imageSrc="/images/lynette.webp" />
