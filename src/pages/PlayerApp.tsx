@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
   Trash2, X, Copy, ShieldAlert, ArrowLeft, ArrowRight, Plus, Minus, LogOut, Zap,
-  ChevronDown, Check, Hash,
+  ChevronDown, Check, Hash, Star,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
@@ -141,6 +141,7 @@ export const PlayerApp: React.FC = () => {
     room_code: string;
     avatar_path?: string | null;
     codename?: string | null;
+    points?: number;
   } | null>(null);
 
   // App UI state
@@ -299,6 +300,18 @@ export const PlayerApp: React.FC = () => {
         setHand(data.hand);
       }
       setLastEvent(data?.last_event ?? null);
+      // The host can nudge points from their console at any time -- a plain
+      // rejoin already returns the player's current row, so a refresh is
+      // enough to pick up a change without a dedicated realtime channel.
+      // Bail out when the value hasn't actually moved: spreading into a new
+      // object on every refresh -- even a no-op one -- would change identity
+      // on each poll, and the subscription effect below keys off this same
+      // object, so an unconditional update here would retrigger it forever.
+      if (typeof data?.player?.points === 'number') {
+        setJoinedPlayer((prev) =>
+          prev && prev.points !== data.player.points ? { ...prev, points: data.player.points } : prev
+        );
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Error fetching player data');
     }
@@ -417,7 +430,12 @@ export const PlayerApp: React.FC = () => {
       window.removeEventListener('online', refresh);
       if (channel) supabase.removeChannel(channel);
     };
-  }, [joinedPlayer]);
+    // Keyed on the identity fields alone, not the joinedPlayer object itself:
+    // fetchPlayerData patches joinedPlayer.points on every refresh this effect
+    // triggers, and depending on the whole object would mean each refresh
+    // re-subscribes and immediately refreshes again -- a self-sustaining loop
+    // of realtime resubscribes and Supabase calls.
+  }, [joinedPlayer?.id, joinedPlayer?.room_code, joinedPlayer?.player_code]);
 
   // Preload catalog images
   const runPreload = async () => {
@@ -481,6 +499,7 @@ export const PlayerApp: React.FC = () => {
       room_code: cleanRoom,
       avatar_path: profile?.avatarPath ?? null,
       codename: profile?.codename ?? null,
+      points: 5,
     };
 
     setJoinedPlayer(playerObj);
@@ -987,19 +1006,27 @@ export const PlayerApp: React.FC = () => {
             <h2 className="font-display text-base font-extrabold text-ink-800 leading-tight truncate">
               {joinedPlayer.name}
             </h2>
-            <button
-              type="button"
-              onClick={() => copyCode('rejoin', joinedPlayer.player_code)}
-              title="Tap to copy your rejoin code"
-              className="chip bg-white code-stamp !text-[11px] mt-1 hover:bg-parchment-100 transition-colors"
-            >
-              {copiedField === 'rejoin' ? (
-                <CheckCircle className="w-3 h-3 text-pip-leaf shrink-0" strokeWidth={2.75} />
-              ) : (
-                <Key className="w-3 h-3 text-crimson-500 shrink-0" strokeWidth={2.75} />
+            <div className="flex items-center gap-1.5 mt-1">
+              <button
+                type="button"
+                onClick={() => copyCode('rejoin', joinedPlayer.player_code)}
+                title="Tap to copy your rejoin code"
+                className="chip bg-white code-stamp !text-[11px] hover:bg-parchment-100 transition-colors"
+              >
+                {copiedField === 'rejoin' ? (
+                  <CheckCircle className="w-3 h-3 text-pip-leaf shrink-0" strokeWidth={2.75} />
+                ) : (
+                  <Key className="w-3 h-3 text-crimson-500 shrink-0" strokeWidth={2.75} />
+                )}
+                {joinedPlayer.player_code}
+              </button>
+              {typeof joinedPlayer.points === 'number' && (
+                <span className="chip bg-pip-gold !text-[11px]" title="Your points">
+                  <Star className="w-3 h-3 text-ink-900 shrink-0" strokeWidth={2.75} />
+                  {joinedPlayer.points}
+                </span>
               )}
-              {joinedPlayer.player_code}
-            </button>
+            </div>
           </div>
         </div>
 

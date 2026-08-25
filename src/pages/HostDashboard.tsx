@@ -362,7 +362,7 @@ export const HostDashboard: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase.rpc('issue_permission', {
+      const { data, error } = await supabase.rpc('issue_permission', {
         p_room_code: cleanRoom,
         p_scope: permScope,
         p_action: permAction,
@@ -381,11 +381,28 @@ export const HostDashboard: React.FC = () => {
         } else {
           alert(error.message);
         }
-      } else {
-        setWindowOpen(true);
-        setLastActionText(describePermission());
-        fetchRoomData();
+        return;
       }
+
+      // issue_permission only inserts a pending_actions row for players who
+      // were active in this room at that instant. A fresh room with a single
+      // player joining late -- or a scoped target who has since left -- can
+      // match nobody, in which case the window would otherwise appear "open"
+      // on the host's screen while no player anywhere was ever actually
+      // permitted to act.
+      if (!data?.issued_count) {
+        alert(
+          permScope === 'player'
+            ? 'That player is not active right now, so nothing was issued.'
+            : 'Nobody is active in the room right now, so nothing was issued. ' +
+                'Wait for a player to join, then open the window again.'
+        );
+        return;
+      }
+
+      setWindowOpen(true);
+      setLastActionText(describePermission());
+      fetchRoomData();
     } catch (err: any) {
       alert(err.message || 'Failed to issue permission');
     }
