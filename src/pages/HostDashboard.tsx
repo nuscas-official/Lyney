@@ -103,9 +103,9 @@ const INITIAL_DEMO_NPC_CATALOG: NpcEventCatalogEntry[] = [
         weight: 1,
         active: true,
         options: [
-          // A judged option: nothing is shown to the player until the host
-          // rules success or failure from the room feed below.
-          { id: 'o4', scenario_id: 'sc2', label: 'Accept and think seriously', outcome_mode: 'judged', effect: null, success_effect: 'You guess right -- a fair deal, and a warning to be careful.', failure_effect: 'You guess wrong -- the "discount" costs more than the full price.', sort_order: 0 },
+          // A judged option: the prompt shows right away, but success/failure
+          // stays hidden until the host rules from the room feed below.
+          { id: 'o4', scenario_id: 'sc2', label: 'Accept and think seriously', outcome_mode: 'judged', effect: 'You try to guess which mask is real -- a bit of a gamble.', success_effect: 'You guess right -- a fair deal, and a warning to be careful.', failure_effect: 'You guess wrong -- the "discount" costs more than the full price.', sort_order: 0 },
           { id: 'o5', scenario_id: 'sc2', label: 'Decline politely', outcome_mode: 'fixed', effect: 'The merchant nods and moves on.', success_effect: null, failure_effect: null, sort_order: 1 },
         ],
       },
@@ -856,6 +856,7 @@ export const HostDashboard: React.FC = () => {
                   image_path: event.image_path,
                   description: scenario.description,
                   chosen_option_label: judgedOption.label,
+                  effect: judgedOption.effect,
                   outcome_mode: 'judged',
                   success_effect: judgedOption.success_effect,
                   failure_effect: judgedOption.failure_effect,
@@ -874,6 +875,7 @@ export const HostDashboard: React.FC = () => {
                   image_path: event.image_path,
                   description: scenario.description,
                   chosen_option_label: null,
+                  effect: null,
                   outcome_mode: null,
                   success_effect: null,
                   failure_effect: null,
@@ -1613,6 +1615,9 @@ export const HostDashboard: React.FC = () => {
                             <span className="truncate max-w-[100px] opacity-80">{player?.name || 'Unknown player'}</span>
                             <span className="truncate max-w-[140px] font-extrabold">{d.chosen_option_label}</span>
                           </div>
+                          {d.effect && (
+                            <p className="text-[10px] font-semibold opacity-80 max-w-[260px] whitespace-pre-line">{d.effect}</p>
+                          )}
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleJudgeNpcEvent(d, 'success')}

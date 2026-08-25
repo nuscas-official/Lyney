@@ -53,10 +53,16 @@ const DEMO_NPC_EVENT: PendingNpcEvent = {
   ],
   issued_at: new Date().toISOString(),
 };
+// The prompt/effect text per option id -- for a fixed pick this is the
+// whole outcome; for a judged one it's shown at the same instant but is
+// only the prompt ("this could go either way"), never the success/failure
+// text, which lives in DEMO_JUDGED_EFFECTS below and stays hidden until the
+// demo Success/Failure buttons stand in for the host's ruling.
 const DEMO_NPC_OPTION_EFFECTS: Record<string, string> = {
   o1: 'The vial fizzes strangely — you feel lucky.',
   o2: 'The merchant halves the price, grumbling.',
   o3: 'The merchant shrugs and vanishes into the crowd.',
+  o6: 'You draw the circle and speak the old words — this could go either way.',
 };
 const DEMO_JUDGED_OPTION_IDS = new Set(['o6']);
 const DEMO_JUDGED_EFFECTS: Record<string, { success: string; failure: string }> = {
@@ -68,11 +74,14 @@ const DEMO_JUDGED_EFFECTS: Record<string, { success: string; failure: string }> 
 
 /** What's currently on screen for the NPC event reveal modal -- a snapshot,
  *  not a live view of pendingNpcEvents/unseenNpcEvents, so a poll landing
- *  mid-read can't change what's displayed out from under the player. */
+ *  mid-read can't change what's displayed out from under the player.
+ *  `effect` is always the prompt text (the whole outcome for a fixed pick,
+ *  just the "what's happening" text for a judged one); `outcomeEffect` is
+ *  the success/failure text, present only once a judged pick is resolved. */
 type ActiveNpcReveal =
   | { phase: 'choose'; event: PendingNpcEvent }
-  | { phase: 'awaiting'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string }
-  | { phase: 'resolved'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string; effect: string };
+  | { phase: 'awaiting'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string; effect: string }
+  | { phase: 'resolved'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string; effect: string; outcomeEffect: string | null };
 
 /** Everything the information collection form asks a new player for. */
 interface NewPlayerProfile {
@@ -258,6 +267,7 @@ export const PlayerApp: React.FC = () => {
             imagePath: next.image_path,
             description: next.description,
             label: next.chosen_option_label,
+            effect: next.effect,
           }
         : {
             phase: 'resolved',
@@ -266,7 +276,8 @@ export const PlayerApp: React.FC = () => {
             imagePath: next.image_path,
             description: next.description,
             label: next.chosen_option_label,
-            effect: next.effect || '',
+            effect: next.effect,
+            outcomeEffect: next.outcome_effect,
           }
     );
   }, [pendingNpcEvents, unseenNpcEvents, activeReveal, dismissedAwaitingIds]);
@@ -871,6 +882,7 @@ export const PlayerApp: React.FC = () => {
           imagePath: event.image_path,
           description: event.description,
           label: option.label,
+          effect: DEMO_NPC_OPTION_EFFECTS[optionId] || 'Nothing happens.',
         });
       } else {
         setActiveReveal({
@@ -881,6 +893,7 @@ export const PlayerApp: React.FC = () => {
           description: event.description,
           label: option.label,
           effect: DEMO_NPC_OPTION_EFFECTS[optionId] || 'Nothing happens.',
+          outcomeEffect: null,
         });
       }
       return;
@@ -914,6 +927,7 @@ export const PlayerApp: React.FC = () => {
               imagePath: event.image_path,
               description: event.description,
               label: data.label,
+              effect: data.effect,
             }
           : {
               phase: 'resolved',
@@ -923,6 +937,7 @@ export const PlayerApp: React.FC = () => {
               description: event.description,
               label: data.label,
               effect: data.effect,
+              outcomeEffect: null,
             }
       );
     } catch (err: any) {
@@ -945,8 +960,8 @@ export const PlayerApp: React.FC = () => {
   // round trip available from this page in demo mode.
   const handleDemoJudge = (outcome: 'success' | 'failure') => {
     if (!activeReveal || activeReveal.phase !== 'awaiting') return;
-    const effect = DEMO_JUDGED_EFFECTS.o6?.[outcome] || 'Nothing happens.';
-    setActiveReveal({ ...activeReveal, phase: 'resolved', effect });
+    const outcomeEffect = DEMO_JUDGED_EFFECTS.o6?.[outcome] || 'Nothing happens.';
+    setActiveReveal({ ...activeReveal, phase: 'resolved', outcomeEffect });
   };
 
   // Dismiss the resolved NPC event: acknowledge it server-side (the only
@@ -962,7 +977,8 @@ export const PlayerApp: React.FC = () => {
       image_path: resolved.imagePath,
       description: resolved.description,
       chosen_option_label: resolved.label,
-      chosen_effect: resolved.effect,
+      effect: resolved.effect,
+      outcome_effect: resolved.outcomeEffect,
       resolved_at: new Date().toISOString(),
     });
     setPendingNpcEvents((prev) => prev.filter((e) => e.delivery_id !== resolved.deliveryId));
@@ -1624,6 +1640,7 @@ export const PlayerApp: React.FC = () => {
                   <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500">
                     You chose: {activeReveal.label}
                   </p>
+                  <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{activeReveal.effect}</p>
                   <p className="text-sm font-semibold text-ink-700 leading-snug flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-pip-gold border-2 border-ink-900 animate-pulse shrink-0" />
                     Your host is deciding what happens next…
@@ -1642,11 +1659,16 @@ export const PlayerApp: React.FC = () => {
               )}
 
               {activeReveal.phase === 'resolved' && (
-                <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left">
-                  <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500 mb-1.5">
+                <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left space-y-2.5">
+                  <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500">
                     You chose: {activeReveal.label}
                   </p>
                   <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{activeReveal.effect}</p>
+                  {activeReveal.outcomeEffect && (
+                    <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line pt-2 border-t-2 border-dashed border-ink-900/20">
+                      {activeReveal.outcomeEffect}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1699,11 +1721,16 @@ export const PlayerApp: React.FC = () => {
               <p className="text-sm font-semibold text-ink-700 text-left leading-snug mb-4 px-1 whitespace-pre-line">
                 {lastNpcEvent.description}
               </p>
-              <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left">
-                <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500 mb-1.5">
+              <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left space-y-2.5">
+                <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500">
                   You chose: {lastNpcEvent.chosen_option_label}
                 </p>
-                <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{lastNpcEvent.chosen_effect}</p>
+                <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{lastNpcEvent.effect}</p>
+                {lastNpcEvent.outcome_effect && (
+                  <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line pt-2 border-t-2 border-dashed border-ink-900/20">
+                    {lastNpcEvent.outcome_effect}
+                  </p>
+                )}
               </div>
             </div>
           </div>

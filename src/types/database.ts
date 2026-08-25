@@ -83,16 +83,17 @@ export type NpcOutcomeMode = 'fixed' | 'judged';
 
 /** One selectable choice inside a scenario, as the host's catalog sees it —
  *  every text it could resolve to, fixed or judged. Never sent to a player
- *  in this shape: a pending delivery only ever carries `{id, label}`, and a
- *  judged pick's success/failure text is withheld until the host rules on
- *  it (see PendingNpcEvent / UnseenNpcEvent below). */
+ *  in this shape: a pending delivery only ever carries `{id, label}`. */
 export interface NpcEventOption {
   id: string;
   scenario_id: string;
   label: string;
   outcome_mode: NpcOutcomeMode;
-  /** Set when outcome_mode is 'fixed'; null otherwise. */
-  effect: string | null;
+  /** Always set. For 'fixed' this is the whole outcome, shown the instant
+   *  the option is picked. For 'judged' it's the prompt shown at that same
+   *  moment ("this is a skill check") -- never the success/failure text,
+   *  which is withheld until the host rules on it. */
+  effect: string;
   /** Set when outcome_mode is 'judged'; null otherwise. */
   success_effect: string | null;
   /** Set when outcome_mode is 'judged'; null otherwise. */
@@ -133,13 +134,13 @@ export interface PendingNpcEvent {
   issued_at: string;
 }
 
-/** A delivery the player has picked an option for but hasn't seen the
- *  outcome of yet. 'awaiting' means a judged pick with no ruling from the
- *  host yet -- `effect` is null, on purpose, so there is nothing in this
- *  object for a client build to leak early. 'resolved' means it's ready to
- *  reveal (a fixed pick, or a judged one the host has just ruled on); once
- *  the player looks, acknowledge_npc_event drops it out of this list and it
- *  becomes the ResolvedNpcEvent recall strip below. */
+/** A delivery the player has picked an option for but hasn't seen the final
+ *  outcome of yet. `effect` -- the prompt ("this is a skill check") -- is
+ *  always here regardless of state; it isn't a spoiler. `outcome_effect` is
+ *  the success/failure text and stays null until the host rules, which is
+ *  what 'awaiting' vs. 'resolved' tracks. Once the player looks,
+ *  acknowledge_npc_event drops this out of the list and it becomes the
+ *  ResolvedNpcEvent recall strip below. */
 export interface UnseenNpcEvent {
   delivery_id: string;
   npc_event_id: string;
@@ -147,21 +148,24 @@ export interface UnseenNpcEvent {
   image_path: string | null;
   description: string;
   chosen_option_label: string;
+  effect: string;
   state: 'awaiting' | 'resolved';
-  effect: string | null;
+  outcome_effect: string | null;
   chosen_at: string;
   resolved_at: string | null;
 }
 
 /** What's left once the player has seen the outcome — kept for the recall
- *  strip after the reveal is dismissed and acknowledged. */
+ *  strip after the reveal is dismissed and acknowledged. `outcome_effect` is
+ *  null for a fixed pick, whose `effect` already was the whole outcome. */
 export interface ResolvedNpcEvent {
   delivery_id: string;
   title: string;
   image_path: string | null;
   description: string;
   chosen_option_label: string;
-  chosen_effect: string;
+  effect: string;
+  outcome_effect: string | null;
   resolved_at: string;
 }
 
@@ -177,6 +181,8 @@ export interface RoomNpcDelivery {
   image_path: string | null;
   description: string;
   chosen_option_label: string | null;
+  /** The chosen option's prompt text, known as soon as chosen_option_label is. */
+  effect: string | null;
   outcome_mode: NpcOutcomeMode | null;
   success_effect: string | null;
   failure_effect: string | null;

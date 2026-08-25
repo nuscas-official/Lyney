@@ -23,7 +23,8 @@ export interface SaveOptionInput {
   scenarioId: string;
   label: string;
   outcomeMode: NpcOutcomeMode;
-  effect: string | null;
+  /** Required in both modes now -- the prompt shown at pick time, fixed or judged. */
+  effect: string;
   successEffect: string | null;
   failureEffect: string | null;
   sortOrder: number;
@@ -109,7 +110,8 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
 
   const optionModalValid = (o: NonNullable<OptionModalState>) =>
     o.label.trim() !== '' &&
-    (o.outcomeMode === 'fixed' ? o.effect.trim() !== '' : o.successEffect.trim() !== '' && o.failureEffect.trim() !== '');
+    o.effect.trim() !== '' &&
+    (o.outcomeMode === 'fixed' || (o.successEffect.trim() !== '' && o.failureEffect.trim() !== ''));
 
   const submitOption = async () => {
     if (!optionModal || !optionModalValid(optionModal) || busy) return;
@@ -120,7 +122,7 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
         scenarioId: optionModal.scenarioId,
         label: optionModal.label.trim(),
         outcomeMode: optionModal.outcomeMode,
-        effect: optionModal.outcomeMode === 'fixed' ? optionModal.effect.trim() : null,
+        effect: optionModal.effect.trim(),
         successEffect: optionModal.outcomeMode === 'judged' ? optionModal.successEffect.trim() : null,
         failureEffect: optionModal.outcomeMode === 'judged' ? optionModal.failureEffect.trim() : null,
         sortOrder: optionModal.sortOrder || 0,
@@ -287,9 +289,10 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
                                     </span>
                                   )}
                                 </div>
-                                {option.outcome_mode === 'fixed' ? (
-                                  <p className="text-[11px] font-semibold text-ink-500 leading-snug mt-0.5 whitespace-pre-line">{option.effect}</p>
-                                ) : (
+                                <p className="text-[11px] font-semibold text-ink-500 leading-snug mt-0.5 whitespace-pre-line">
+                                  {option.effect}
+                                </p>
+                                {option.outcome_mode === 'judged' && (
                                   <div className="mt-1 space-y-1">
                                     <p className="text-[11px] font-semibold text-pip-leaf leading-snug whitespace-pre-line">
                                       <CheckCircle2 className="w-3 h-3 inline mr-1 -mt-0.5" strokeWidth={2.75} />
@@ -580,22 +583,28 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
                 </div>
                 <p className="text-[11px] font-semibold text-ink-400 mt-1.5">
                   {optionModal.outcomeMode === 'fixed'
-                    ? 'The player sees this text the instant they pick the option.'
-                    : "Nothing is shown to the player until you rule success or failure from the room feed — so whatever happens at the table (a minigame, a roll) can decide it."}
+                    ? 'The effect below is the whole outcome, shown the instant they pick the option.'
+                    : 'The effect below is shown the instant they pick it too -- but only as a prompt (e.g. "this is a skill check"). The success/failure text stays hidden until you rule from the room feed.'}
                 </p>
               </div>
 
-              {optionModal.outcomeMode === 'fixed' ? (
-                <div>
-                  <label className="field-label">Effect (revealed after they choose)</label>
-                  <textarea
-                    value={optionModal.effect}
-                    onChange={(e) => setOptionModal({ ...optionModal, effect: e.target.value })}
-                    placeholder="What happens as a result…"
-                    className="field !h-24 resize-none"
-                  />
-                </div>
-              ) : (
+              <div>
+                <label className="field-label">
+                  {optionModal.outcomeMode === 'fixed' ? 'Effect (shown the instant they pick it)' : 'Prompt (shown the instant they pick it)'}
+                </label>
+                <textarea
+                  value={optionModal.effect}
+                  onChange={(e) => setOptionModal({ ...optionModal, effect: e.target.value })}
+                  placeholder={
+                    optionModal.outcomeMode === 'fixed'
+                      ? 'What happens as a result…'
+                      : 'What the player sees while they wait, e.g. "You attempt the ritual — this could go either way."'
+                  }
+                  className="field !h-24 resize-none"
+                />
+              </div>
+
+              {optionModal.outcomeMode === 'judged' && (
                 <>
                   <div>
                     <label className="field-label">
