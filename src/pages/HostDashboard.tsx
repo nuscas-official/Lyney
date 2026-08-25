@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   Shield, Users, Layers, RotateCcw, Plus, Minus, Trash2,
-  UserX, UserCheck, RefreshCw, Sliders, X, Zap, Star, Ghost, Dices,
+  UserX, UserCheck, RefreshCw, Sliders, X, Zap, Star, Ghost, Dices, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl, getNpcImageUrl, listNpcImagePaths } from '../lib/supabase';
 import { Token, Standee, PaperChip, BoardHeading } from '../components/BoardBits';
-import { NpcEventCatalogEditor } from '../components/NpcEventCatalogEditor';
+import { NpcEventCatalogEditor, SaveOptionInput } from '../components/NpcEventCatalogEditor';
 import { Card, CardKind, DrawPool, NpcEventCatalogEntry, RoomNpcDelivery } from '../types/database';
 import {
   CARD_KINDS, DRAW_POOLS, KIND_LABEL, KIND_TONE, POOL_KINDS, POOL_LABEL, POOL_TONE,
@@ -91,20 +91,22 @@ const INITIAL_DEMO_NPC_CATALOG: NpcEventCatalogEntry[] = [
         weight: 2,
         active: true,
         options: [
-          { id: 'o1', scenario_id: 'sc1', label: 'Buy it', effect: 'The vial fizzes strangely -- you feel lucky.', sort_order: 0 },
-          { id: 'o2', scenario_id: 'sc1', label: 'Haggle', effect: 'The merchant halves the price, grumbling.', sort_order: 1 },
-          { id: 'o3', scenario_id: 'sc1', label: 'Walk away', effect: 'The merchant shrugs and vanishes into the crowd.', sort_order: 2 },
+          { id: 'o1', scenario_id: 'sc1', label: 'Buy it', outcome_mode: 'fixed', effect: 'The vial fizzes strangely -- you feel lucky.', success_effect: null, failure_effect: null, sort_order: 0 },
+          { id: 'o2', scenario_id: 'sc1', label: 'Haggle', outcome_mode: 'fixed', effect: 'The merchant halves the price, grumbling.', success_effect: null, failure_effect: null, sort_order: 1 },
+          { id: 'o3', scenario_id: 'sc1', label: 'Walk away', outcome_mode: 'fixed', effect: 'The merchant shrugs and vanishes into the crowd.', success_effect: null, failure_effect: null, sort_order: 2 },
         ],
       },
       {
         id: 'sc2',
         npc_event_id: 'npc1',
-        description: 'The merchant recognizes you and offers a "loyalty discount."',
+        description: 'The merchant recognizes you and offers a "loyalty discount" -- but only if you can guess which of his masks is real.',
         weight: 1,
         active: true,
         options: [
-          { id: 'o4', scenario_id: 'sc2', label: 'Accept and think seriously', effect: 'You get a fair deal -- and a warning to be careful.', sort_order: 0 },
-          { id: 'o5', scenario_id: 'sc2', label: 'Decline politely', effect: 'The merchant nods and moves on.', sort_order: 1 },
+          // A judged option: nothing is shown to the player until the host
+          // rules success or failure from the room feed below.
+          { id: 'o4', scenario_id: 'sc2', label: 'Accept and think seriously', outcome_mode: 'judged', effect: null, success_effect: 'You guess right -- a fair deal, and a warning to be careful.', failure_effect: 'You guess wrong -- the "discount" costs more than the full price.', sort_order: 0 },
+          { id: 'o5', scenario_id: 'sc2', label: 'Decline politely', outcome_mode: 'fixed', effect: 'The merchant nods and moves on.', success_effect: null, failure_effect: null, sort_order: 1 },
         ],
       },
     ],
@@ -835,19 +837,54 @@ export const HostDashboard: React.FC = () => {
           ? activePlayers
           : activePlayers.filter((p) => p.id === npcTargetPlayerId);
 
+      // A judged option needs a host ruling to demo at all -- there's no
+      // real player in demo mode to make the pick, so the first target is
+      // fast-forwarded straight to "already chose it, awaiting your call"
+      // whenever the triggered scenario has one, purely so the room feed's
+      // Success/Failure buttons have something to click.
+      const judgedOption = scenario.options.find((o) => o.outcome_mode === 'judged');
+
       setNpcDeliveries((prev) => [
-        ...targets.map((p) => ({
-          delivery_id: `d-${Date.now()}-${p.id}`,
-          player_id: p.id,
-          npc_event_id: event.id,
-          title: event.title,
-          image_path: event.image_path,
-          description: scenario.description,
-          chosen_option_label: null,
-          chosen_effect: null,
-          issued_at: new Date().toISOString(),
-          resolved_at: null,
-        })),
+        ...targets.map(
+          (p, i): RoomNpcDelivery =>
+            judgedOption && i === 0
+              ? {
+                  delivery_id: `d-${Date.now()}-${p.id}`,
+                  player_id: p.id,
+                  npc_event_id: event.id,
+                  title: event.title,
+                  image_path: event.image_path,
+                  description: scenario.description,
+                  chosen_option_label: judgedOption.label,
+                  outcome_mode: 'judged',
+                  success_effect: judgedOption.success_effect,
+                  failure_effect: judgedOption.failure_effect,
+                  outcome: null,
+                  chosen_effect: null,
+                  issued_at: new Date().toISOString(),
+                  chosen_at: new Date().toISOString(),
+                  resolved_at: null,
+                  seen_at: null,
+                }
+              : {
+                  delivery_id: `d-${Date.now()}-${p.id}`,
+                  player_id: p.id,
+                  npc_event_id: event.id,
+                  title: event.title,
+                  image_path: event.image_path,
+                  description: scenario.description,
+                  chosen_option_label: null,
+                  outcome_mode: null,
+                  success_effect: null,
+                  failure_effect: null,
+                  outcome: null,
+                  chosen_effect: null,
+                  issued_at: new Date().toISOString(),
+                  chosen_at: null,
+                  resolved_at: null,
+                  seen_at: null,
+                }
+        ),
         ...prev,
       ]);
       setLastActionText(`Triggered "${event.title}" on ${npcScope === 'room' ? 'the room' : targets[0]?.name || 'a player'}`);
@@ -885,6 +922,39 @@ export const HostDashboard: React.FC = () => {
       fetchRoomData();
     } catch (err: any) {
       alert(err.message || 'Failed to trigger NPC event');
+    }
+  };
+
+  // The host's ruling on a judged pick -- the only thing that reveals its
+  // effect to the player. Re-callable: fixing a misclick is clicking the
+  // other button, not a separate undo path.
+  const handleJudgeNpcEvent = async (delivery: RoomNpcDelivery, outcome: 'success' | 'failure') => {
+    if (isDemoMode) {
+      const effect = outcome === 'success' ? delivery.success_effect : delivery.failure_effect;
+      setNpcDeliveries((prev) =>
+        prev.map((d) =>
+          d.delivery_id === delivery.delivery_id
+            ? { ...d, outcome, chosen_effect: effect, resolved_at: new Date().toISOString() }
+            : d
+        )
+      );
+      setLastActionText(`Ruled "${outcome}" for ${delivery.chosen_option_label}`);
+      return;
+    }
+
+    try {
+      const { error } = await supabase.rpc('judge_npc_event', {
+        p_delivery_id: delivery.delivery_id,
+        p_outcome: outcome,
+      });
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      setLastActionText(`Ruled "${outcome}" for ${delivery.chosen_option_label}`);
+      fetchRoomData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to record that ruling');
     }
   };
 
@@ -987,27 +1057,30 @@ export const HostDashboard: React.FC = () => {
     fetchNpcCatalog();
   };
 
-  const handleSaveNpcOption = async (input: { id?: string; scenarioId: string; label: string; effect: string; sortOrder: number }) => {
+  const handleSaveNpcOption = async (input: SaveOptionInput) => {
     if (isDemoMode) {
       setNpcCatalog((prev) =>
         prev.map((e) => ({
           ...e,
           scenarios: e.scenarios.map((s) => {
             if (s.id !== input.scenarioId) return s;
+            const patch = {
+              label: input.label,
+              outcome_mode: input.outcomeMode,
+              effect: input.effect,
+              success_effect: input.successEffect,
+              failure_effect: input.failureEffect,
+              sort_order: input.sortOrder,
+            };
             if (input.id) {
               return {
                 ...s,
-                options: s.options.map((o) =>
-                  o.id === input.id ? { ...o, label: input.label, effect: input.effect, sort_order: input.sortOrder } : o
-                ),
+                options: s.options.map((o) => (o.id === input.id ? { ...o, ...patch } : o)),
               };
             }
             return {
               ...s,
-              options: [
-                ...s.options,
-                { id: `o-${Date.now()}`, scenario_id: s.id, label: input.label, effect: input.effect, sort_order: input.sortOrder },
-              ],
+              options: [...s.options, { id: `o-${Date.now()}`, scenario_id: s.id, ...patch }],
             };
           }),
         }))
@@ -1018,7 +1091,10 @@ export const HostDashboard: React.FC = () => {
       p_id: input.id || null,
       p_scenario_id: input.scenarioId,
       p_label: input.label,
+      p_outcome_mode: input.outcomeMode,
       p_effect: input.effect,
+      p_success_effect: input.successEffect,
+      p_failure_effect: input.failureEffect,
       p_sort_order: input.sortOrder,
     });
     if (error) {
@@ -1526,6 +1602,37 @@ export const HostDashboard: React.FC = () => {
                 <div className="flex flex-wrap gap-1.5">
                   {npcDeliveries.map((d) => {
                     const player = players.find((p) => p.id === d.player_id);
+                    // Three states: nobody's picked yet, somebody picked a
+                    // judged option and it's this host's call, or it's done.
+                    const awaitingJudgement = !!d.chosen_option_label && !d.resolved_at && d.outcome_mode === 'judged';
+
+                    if (awaitingJudgement) {
+                      return (
+                        <div key={d.delivery_id} className="chip bg-pip-violet text-white !py-1 flex-col !items-start gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate max-w-[100px] opacity-80">{player?.name || 'Unknown player'}</span>
+                            <span className="truncate max-w-[140px] font-extrabold">{d.chosen_option_label}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleJudgeNpcEvent(d, 'success')}
+                              className="chip !py-0.5 !px-2 bg-pip-leaf !text-[10px] hover:brightness-105 active:translate-y-px"
+                              title={d.success_effect || ''}
+                            >
+                              <CheckCircle2 className="w-3 h-3" strokeWidth={2.75} /> Success
+                            </button>
+                            <button
+                              onClick={() => handleJudgeNpcEvent(d, 'failure')}
+                              className="chip !py-0.5 !px-2 bg-pip-red text-white !text-[10px] hover:brightness-105 active:translate-y-px"
+                              title={d.failure_effect || ''}
+                            >
+                              <XCircle className="w-3 h-3" strokeWidth={2.75} /> Failure
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <span
                         key={d.delivery_id}

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import {
   Ghost, Plus, Pencil, Trash2, ChevronDown, ChevronUp, X, Dices, Image as ImageIcon,
+  Eye, EyeOff, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { Token, PaperChip, BoardHeading } from './BoardBits';
 import { getNpcImageUrl } from '../lib/supabase';
-import { NpcEventCatalogEntry, NpcEventScenario, NpcEventOption } from '../types/database';
+import { NpcEventCatalogEntry, NpcEventScenario, NpcEventOption, NpcOutcomeMode } from '../types/database';
 
 /* ==========================================================================
    NPC EVENT CATALOG EDITOR
@@ -17,7 +18,16 @@ import { NpcEventCatalogEntry, NpcEventScenario, NpcEventOption } from '../types
 
 export interface SaveEventInput { id?: string; title: string; imagePath: string | null; active: boolean }
 export interface SaveScenarioInput { id?: string; npcEventId: string; description: string; weight: number; active: boolean }
-export interface SaveOptionInput { id?: string; scenarioId: string; label: string; effect: string; sortOrder: number }
+export interface SaveOptionInput {
+  id?: string;
+  scenarioId: string;
+  label: string;
+  outcomeMode: NpcOutcomeMode;
+  effect: string | null;
+  successEffect: string | null;
+  failureEffect: string | null;
+  sortOrder: number;
+}
 
 interface Props {
   catalog: NpcEventCatalogEntry[];
@@ -32,7 +42,16 @@ interface Props {
 
 type EventModalState = { id?: string; title: string; imagePath: string; active: boolean } | null;
 type ScenarioModalState = { id?: string; npcEventId: string; description: string; weight: number; active: boolean } | null;
-type OptionModalState = { id?: string; scenarioId: string; label: string; effect: string; sortOrder: number } | null;
+type OptionModalState = {
+  id?: string;
+  scenarioId: string;
+  label: string;
+  outcomeMode: NpcOutcomeMode;
+  effect: string;
+  successEffect: string;
+  failureEffect: string;
+  sortOrder: number;
+} | null;
 
 export const NpcEventCatalogEditor: React.FC<Props> = ({
   catalog, imageChoices,
@@ -88,15 +107,22 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
     }
   };
 
+  const optionModalValid = (o: NonNullable<OptionModalState>) =>
+    o.label.trim() !== '' &&
+    (o.outcomeMode === 'fixed' ? o.effect.trim() !== '' : o.successEffect.trim() !== '' && o.failureEffect.trim() !== '');
+
   const submitOption = async () => {
-    if (!optionModal || !optionModal.label.trim() || !optionModal.effect.trim() || busy) return;
+    if (!optionModal || !optionModalValid(optionModal) || busy) return;
     setBusy(true);
     try {
       await onSaveOption({
         id: optionModal.id,
         scenarioId: optionModal.scenarioId,
         label: optionModal.label.trim(),
-        effect: optionModal.effect.trim(),
+        outcomeMode: optionModal.outcomeMode,
+        effect: optionModal.outcomeMode === 'fixed' ? optionModal.effect.trim() : null,
+        successEffect: optionModal.outcomeMode === 'judged' ? optionModal.successEffect.trim() : null,
+        failureEffect: optionModal.outcomeMode === 'judged' ? optionModal.failureEffect.trim() : null,
         sortOrder: optionModal.sortOrder || 0,
       });
       setOptionModal(null);
@@ -253,8 +279,28 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
                           {scenario.options.map((option: NpcEventOption) => (
                             <div key={option.id} className="flex items-start gap-2 bg-white rounded-lg border-2 border-ink-900/10 px-2.5 py-2">
                               <div className="min-w-0 flex-1">
-                                <p className="text-xs font-extrabold text-ink-800">{option.label}</p>
-                                <p className="text-[11px] font-semibold text-ink-500 leading-snug mt-0.5 whitespace-pre-line">{option.effect}</p>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="text-xs font-extrabold text-ink-800">{option.label}</p>
+                                  {option.outcome_mode === 'judged' && (
+                                    <span className="chip !py-0.5 !px-1.5 bg-pip-violet text-white !text-[10px]" title="The host rules success or failure after the player picks this">
+                                      <EyeOff className="w-2.5 h-2.5" strokeWidth={3} /> Host judges
+                                    </span>
+                                  )}
+                                </div>
+                                {option.outcome_mode === 'fixed' ? (
+                                  <p className="text-[11px] font-semibold text-ink-500 leading-snug mt-0.5 whitespace-pre-line">{option.effect}</p>
+                                ) : (
+                                  <div className="mt-1 space-y-1">
+                                    <p className="text-[11px] font-semibold text-pip-leaf leading-snug whitespace-pre-line">
+                                      <CheckCircle2 className="w-3 h-3 inline mr-1 -mt-0.5" strokeWidth={2.75} />
+                                      {option.success_effect}
+                                    </p>
+                                    <p className="text-[11px] font-semibold text-crimson-600 leading-snug whitespace-pre-line">
+                                      <XCircle className="w-3 h-3 inline mr-1 -mt-0.5" strokeWidth={2.75} />
+                                      {option.failure_effect}
+                                    </p>
+                                  </div>
+                                )}
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
@@ -263,7 +309,10 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
                                       id: option.id,
                                       scenarioId: scenario.id,
                                       label: option.label,
-                                      effect: option.effect,
+                                      outcomeMode: option.outcome_mode,
+                                      effect: option.effect || '',
+                                      successEffect: option.success_effect || '',
+                                      failureEffect: option.failure_effect || '',
                                       sortOrder: option.sort_order,
                                     })
                                   }
@@ -287,7 +336,10 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
                               setOptionModal({
                                 scenarioId: scenario.id,
                                 label: '',
+                                outcomeMode: 'fixed',
                                 effect: '',
+                                successEffect: '',
+                                failureEffect: '',
                                 sortOrder: scenario.options.length,
                               })
                             }
@@ -505,14 +557,72 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="field-label">Effect (revealed after they choose)</label>
-                <textarea
-                  value={optionModal.effect}
-                  onChange={(e) => setOptionModal({ ...optionModal, effect: e.target.value })}
-                  placeholder="What happens as a result…"
-                  className="field !h-24 resize-none"
-                />
+                <label className="field-label">When they pick it…</label>
+                <div className="flex gap-1 p-1 rounded-xl bg-parchment-200 border-[2.5px] border-ink-900">
+                  <button
+                    type="button"
+                    onClick={() => setOptionModal({ ...optionModal, outcomeMode: 'fixed' })}
+                    className={`flex-1 py-2 rounded-lg font-display font-bold text-xs transition-colors flex items-center justify-center gap-1.5 ${
+                      optionModal.outcomeMode === 'fixed' ? 'bg-pip-gold text-ink-900 shadow-sticker-sm' : 'text-ink-500'
+                    }`}
+                  >
+                    <Eye className="w-3.5 h-3.5" strokeWidth={2.75} /> Show effect right away
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOptionModal({ ...optionModal, outcomeMode: 'judged' })}
+                    className={`flex-1 py-2 rounded-lg font-display font-bold text-xs transition-colors flex items-center justify-center gap-1.5 ${
+                      optionModal.outcomeMode === 'judged' ? 'bg-pip-violet text-white shadow-sticker-sm' : 'text-ink-500'
+                    }`}
+                  >
+                    <EyeOff className="w-3.5 h-3.5" strokeWidth={2.75} /> Host judges after
+                  </button>
+                </div>
+                <p className="text-[11px] font-semibold text-ink-400 mt-1.5">
+                  {optionModal.outcomeMode === 'fixed'
+                    ? 'The player sees this text the instant they pick the option.'
+                    : "Nothing is shown to the player until you rule success or failure from the room feed — so whatever happens at the table (a minigame, a roll) can decide it."}
+                </p>
               </div>
+
+              {optionModal.outcomeMode === 'fixed' ? (
+                <div>
+                  <label className="field-label">Effect (revealed after they choose)</label>
+                  <textarea
+                    value={optionModal.effect}
+                    onChange={(e) => setOptionModal({ ...optionModal, effect: e.target.value })}
+                    placeholder="What happens as a result…"
+                    className="field !h-24 resize-none"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="field-label">
+                      <CheckCircle2 className="w-3.5 h-3.5 inline text-pip-leaf -mt-0.5 mr-1" strokeWidth={2.75} />
+                      Success text
+                    </label>
+                    <textarea
+                      value={optionModal.successEffect}
+                      onChange={(e) => setOptionModal({ ...optionModal, successEffect: e.target.value })}
+                      placeholder="What happens if you rule it a success…"
+                      className="field !h-20 resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label">
+                      <XCircle className="w-3.5 h-3.5 inline text-crimson-600 -mt-0.5 mr-1" strokeWidth={2.75} />
+                      Failure text
+                    </label>
+                    <textarea
+                      value={optionModal.failureEffect}
+                      onChange={(e) => setOptionModal({ ...optionModal, failureEffect: e.target.value })}
+                      placeholder="What happens if you rule it a failure…"
+                      className="field !h-20 resize-none"
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex gap-2">
@@ -521,7 +631,7 @@ export const NpcEventCatalogEditor: React.FC<Props> = ({
               </button>
               <button
                 onClick={submitOption}
-                disabled={busy || !optionModal.label.trim() || !optionModal.effect.trim()}
+                disabled={busy || !optionModalValid(optionModal)}
                 className="btn-leaf flex-1 !py-2.5 !text-xs disabled:opacity-60"
               >
                 Save

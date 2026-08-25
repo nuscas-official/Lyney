@@ -7,7 +7,7 @@ import {
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
 import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl, listAvatarPaths, getNpcImageUrl } from '../lib/supabase';
-import { CardKind, DrawPool, EventDraw, HeldCard, PendingNpcEvent, ResolvedNpcEvent } from '../types/database';
+import { CardKind, DrawPool, EventDraw, HeldCard, PendingNpcEvent, ResolvedNpcEvent, UnseenNpcEvent } from '../types/database';
 import { CODENAME_OPTIONS, RACE_OPTIONS, REASON_OPTIONS } from '../lib/profile';
 import {
   DRAW_POOLS, KIND_LABEL, POOL_BUTTON, POOL_DRAW_PHRASE, POOL_KINDS, POOL_LABEL, POOL_TONE,
@@ -33,8 +33,11 @@ const DEMO_REJOIN_CODES = ['K7M4QP', 'K7M-4QP', 'DEMO12'];
 
 // A sample NPC event delivery for the demo build's "queue an NPC event"
 // button. Effects are kept out of PendingNpcEvent (the reveal doesn't carry
-// them until resolved server-side), so this map stands in for that RPC round
-// trip in demo mode.
+// them until resolved server-side), so these maps stand in for that RPC
+// round trip in demo mode -- one option is judged, so the "awaiting" screen
+// has something real to show, with demo-only Success/Failure buttons
+// standing in for the host's ruling (there's no cross-page state in demo
+// mode to actually reach the Host Console from here).
 const DEMO_NPC_EVENT: PendingNpcEvent = {
   delivery_id: 'npc-demo-1',
   npc_event_id: 'npc1',
@@ -46,6 +49,7 @@ const DEMO_NPC_EVENT: PendingNpcEvent = {
     { id: 'o1', label: 'Buy it' },
     { id: 'o2', label: 'Haggle' },
     { id: 'o3', label: 'Walk away' },
+    { id: 'o6', label: 'Attempt the ritual' },
   ],
   issued_at: new Date().toISOString(),
 };
@@ -54,6 +58,21 @@ const DEMO_NPC_OPTION_EFFECTS: Record<string, string> = {
   o2: 'The merchant halves the price, grumbling.',
   o3: 'The merchant shrugs and vanishes into the crowd.',
 };
+const DEMO_JUDGED_OPTION_IDS = new Set(['o6']);
+const DEMO_JUDGED_EFFECTS: Record<string, { success: string; failure: string }> = {
+  o6: {
+    success: 'The ritual succeeds — you feel a strange new kinship with Anitan.',
+    failure: 'The ritual backfires, but Anitan is delighted to have made a new friend anyway :D',
+  },
+};
+
+/** What's currently on screen for the NPC event reveal modal -- a snapshot,
+ *  not a live view of pendingNpcEvents/unseenNpcEvents, so a poll landing
+ *  mid-read can't change what's displayed out from under the player. */
+type ActiveNpcReveal =
+  | { phase: 'choose'; event: PendingNpcEvent }
+  | { phase: 'awaiting'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string }
+  | { phase: 'resolved'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string; effect: string };
 
 /** Everything the information collection form asks a new player for. */
 interface NewPlayerProfile {
@@ -186,30 +205,71 @@ export const PlayerApp: React.FC = () => {
   const [revealedEvent, setRevealedEvent] = useState<EventDraw | null>(null);
   const [lastEvent, setLastEvent] = useState<EventDraw | null>(null);
   // NPC events arrive pushed by the host rather than drawn, so the reveal
-  // modal renders the moment the queue is non-empty -- it doesn't wait for a
-  // button tap. `revealingNpcEvent` snapshots the head of the queue once
-  // claimed for display, decoupled from later polls/realtime updates to
-  // `pendingNpcEvents` (the server already drops a delivery from that list
-  // the instant it's resolved, which would otherwise yank the modal's content
-  // out from under the effect the player is still reading). npcResolution
-  // holds the chosen option's effect once picked, swapping the modal from
-  // "choose" to "here's what happened" before it's dismissed into
-  // lastNpcEvent's recall strip.
+  // modal renders the moment there's something to show -- it doesn't wait for
+  // a button tap. A delivery moves through up to three states on this screen:
+  //   'choose'   -- pick an option (pendingNpcEvents; unchanged from before).
+  //   'awaiting' -- picked a judged option; the host hasn't ruled yet, so
+  //                 there is no effect text anywhere in this state, on
+  //                 purpose -- nothing to leak.
+  //   'resolved' -- ready to reveal (a fixed pick, or a judged one the host
+  //                 has just ruled on). Dismissing this state calls
+  //                 acknowledge_npc_event, which is what finally drops it out
+  //                 of unseenNpcEvents and into lastNpcEvent's recall strip.
+  // activeReveal is a local snapshot of whichever one is on screen, decoupled
+  // from later polls to pendingNpcEvents/unseenNpcEvents so a background
+  // refresh can't yank content out from under something the player is
+  // mid-read of.
   const [pendingNpcEvents, setPendingNpcEvents] = useState<PendingNpcEvent[]>([]);
-  const [revealingNpcEvent, setRevealingNpcEvent] = useState<PendingNpcEvent | null>(null);
-  const [npcResolution, setNpcResolution] = useState<{ label: string; effect: string } | null>(null);
+  const [unseenNpcEvents, setUnseenNpcEvents] = useState<UnseenNpcEvent[]>([]);
+  const [activeReveal, setActiveReveal] = useState<ActiveNpcReveal | null>(null);
   const [isResolvingNpcEvent, setIsResolvingNpcEvent] = useState(false);
   const [lastNpcEvent, setLastNpcEvent] = useState<ResolvedNpcEvent | null>(null);
   const [showLastNpcEvent, setShowLastNpcEvent] = useState(false);
+  // Deliveries whose "awaiting the host" screen the player has already
+  // dismissed once -- skipped by the claim effect below so it doesn't pop
+  // back up on every poll while the host is still deciding. A delivery that
+  // later flips to 'resolved' is always claimed regardless of this set: the
+  // outcome is new information worth surfacing again even if the waiting
+  // placeholder was already closed.
+  const [dismissedAwaitingIds, setDismissedAwaitingIds] = useState<Set<string>>(new Set());
 
-  // Claim the next queued NPC event for display once nothing is currently
-  // being shown/resolved. Runs after every pendingNpcEvents update (a fresh
-  // push from the host, or the queue shrinking once a dismiss clears the head).
+  // Claim the next thing worth showing: an unchosen delivery first, then an
+  // unseen one (awaiting or freshly resolved). Runs whenever either queue or
+  // the currently-active reveal changes.
   useEffect(() => {
-    if (!revealingNpcEvent && !npcResolution && pendingNpcEvents.length > 0) {
-      setRevealingNpcEvent(pendingNpcEvents[0]);
+    if (activeReveal) return;
+
+    if (pendingNpcEvents.length > 0) {
+      setActiveReveal({ phase: 'choose', event: pendingNpcEvents[0] });
+      return;
     }
-  }, [pendingNpcEvents, revealingNpcEvent, npcResolution]);
+
+    const next = unseenNpcEvents.find(
+      (u) => u.state === 'resolved' || !dismissedAwaitingIds.has(u.delivery_id)
+    );
+    if (!next) return;
+
+    setActiveReveal(
+      next.state === 'awaiting'
+        ? {
+            phase: 'awaiting',
+            deliveryId: next.delivery_id,
+            title: next.title,
+            imagePath: next.image_path,
+            description: next.description,
+            label: next.chosen_option_label,
+          }
+        : {
+            phase: 'resolved',
+            deliveryId: next.delivery_id,
+            title: next.title,
+            imagePath: next.image_path,
+            description: next.description,
+            label: next.chosen_option_label,
+            effect: next.effect || '',
+          }
+    );
+  }, [pendingNpcEvents, unseenNpcEvents, activeReveal, dismissedAwaitingIds]);
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [isRemoved, setIsRemoved] = useState(false);
   const [copiedField, setCopiedField] = useState<'rejoin' | 'room' | null>(null);
@@ -287,8 +347,9 @@ export const PlayerApp: React.FC = () => {
     setRevealedEvent(null);
     setLastEvent(null);
     setPendingNpcEvents([]);
-    setRevealingNpcEvent(null);
-    setNpcResolution(null);
+    setUnseenNpcEvents([]);
+    setActiveReveal(null);
+    setDismissedAwaitingIds(new Set());
     setLastNpcEvent(null);
     setErrorMsg(null);
   };
@@ -353,11 +414,12 @@ export const PlayerApp: React.FC = () => {
         setHand(data.hand);
       }
       setLastEvent(data?.last_event ?? null);
-      // The reveal modal reads from revealingNpcEvent/npcResolution, both
-      // local and untouched here, so a poll landing mid-reveal can't yank
-      // content out from under it -- these two are just server truth for the
-      // queue and the recall strip.
+      // The reveal modal reads from activeReveal, a local snapshot untouched
+      // here, so a poll landing mid-reveal can't yank content out from under
+      // it -- these three are just server truth for the queues and the
+      // recall strip.
       setPendingNpcEvents(data?.pending_npc_events ?? []);
+      setUnseenNpcEvents(data?.unseen_npc_events ?? []);
       setLastNpcEvent(data?.last_npc_event ?? null);
       // The host can nudge points from their console at any time -- a plain
       // rejoin already returns the player's current row, so a refresh is
@@ -547,6 +609,7 @@ export const PlayerApp: React.FC = () => {
     setHand(data.hand || []);
     setLastEvent(data.last_event ?? null);
     setPendingNpcEvents(data.pending_npc_events || []);
+    setUnseenNpcEvents(data.unseen_npc_events || []);
     setLastNpcEvent(data.last_npc_event ?? null);
     localStorage.setItem('lyney_player_session', JSON.stringify({ player: pData }));
     fetchRoomLabel(pData.room_code);
@@ -786,31 +849,55 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
-  // Choose an option for the NPC event currently being revealed. The effect
-  // text only exists server-side until this call returns it -- that's the
-  // suspense the pending queue deliberately withholds.
+  // Choose an option for the NPC event currently being revealed. A fixed
+  // option's effect comes straight back; a judged one returns nothing but an
+  // acknowledgement -- there is no effect to send yet, on purpose.
   const handleChooseNpcOption = async (optionId: string) => {
-    if (!revealingNpcEvent || isResolvingNpcEvent) return;
+    if (!activeReveal || activeReveal.phase !== 'choose' || isResolvingNpcEvent) return;
+    const { event } = activeReveal;
 
     if (isDemoMode) {
-      const option = revealingNpcEvent.options.find((o) => o.id === optionId);
+      const option = event.options.find((o) => o.id === optionId);
       if (!option) return;
-      setNpcResolution({ label: option.label, effect: DEMO_NPC_OPTION_EFFECTS[optionId] || 'Nothing happens.' });
+      // Mirrors what the server does the instant a pick is made: it's no
+      // longer an unchosen delivery, so it drops out of the choose queue
+      // regardless of which screen activeReveal shows next.
+      setPendingNpcEvents((prev) => prev.filter((e) => e.delivery_id !== event.delivery_id));
+      if (DEMO_JUDGED_OPTION_IDS.has(optionId)) {
+        setActiveReveal({
+          phase: 'awaiting',
+          deliveryId: event.delivery_id,
+          title: event.title,
+          imagePath: event.image_path,
+          description: event.description,
+          label: option.label,
+        });
+      } else {
+        setActiveReveal({
+          phase: 'resolved',
+          deliveryId: event.delivery_id,
+          title: event.title,
+          imagePath: event.image_path,
+          description: event.description,
+          label: option.label,
+          effect: DEMO_NPC_OPTION_EFFECTS[optionId] || 'Nothing happens.',
+        });
+      }
       return;
     }
 
     setIsResolvingNpcEvent(true);
     try {
       const { data, error } = await supabase.rpc('resolve_npc_event', {
-        p_delivery_id: revealingNpcEvent.delivery_id,
+        p_delivery_id: event.delivery_id,
         p_option_id: optionId,
       });
 
       if (error) {
         if (error.code === 'P0034' || error.code === 'P0029' || error.message.includes('already_resolved') || error.message.includes('not_found')) {
-          // The host undid the trigger, or another tab already resolved it --
-          // either way there's nothing left to reveal.
-          setRevealingNpcEvent(null);
+          // The host undid the trigger, or another tab already picked --
+          // either way there's nothing left to choose here.
+          setActiveReveal(null);
           setErrorMsg('That event is no longer waiting on you.');
         } else {
           setErrorMsg(error.message);
@@ -818,7 +905,26 @@ export const PlayerApp: React.FC = () => {
         return;
       }
 
-      setNpcResolution({ label: data.label, effect: data.effect });
+      setActiveReveal(
+        data.awaiting_host
+          ? {
+              phase: 'awaiting',
+              deliveryId: data.delivery_id,
+              title: event.title,
+              imagePath: event.image_path,
+              description: event.description,
+              label: data.label,
+            }
+          : {
+              phase: 'resolved',
+              deliveryId: data.delivery_id,
+              title: event.title,
+              imagePath: event.image_path,
+              description: event.description,
+              label: data.label,
+              effect: data.effect,
+            }
+      );
     } catch (err: any) {
       setErrorMsg(err.message || 'Could not resolve that choice');
     } finally {
@@ -826,22 +932,54 @@ export const PlayerApp: React.FC = () => {
     }
   };
 
-  // Dismiss the resolved NPC event: drop it from the queue, keep it as the
+  // Close the "awaiting your host" screen without resolving anything -- just
+  // marks it dismissed locally so the claim effect leaves it alone until it
+  // actually flips to resolved.
+  const handleDismissAwaiting = () => {
+    if (!activeReveal || activeReveal.phase !== 'awaiting') return;
+    setDismissedAwaitingIds((prev) => new Set(prev).add(activeReveal.deliveryId));
+    setActiveReveal(null);
+  };
+
+  // Demo-only stand-in for the host's ruling: there's no real Host Console
+  // round trip available from this page in demo mode.
+  const handleDemoJudge = (outcome: 'success' | 'failure') => {
+    if (!activeReveal || activeReveal.phase !== 'awaiting') return;
+    const effect = DEMO_JUDGED_EFFECTS.o6?.[outcome] || 'Nothing happens.';
+    setActiveReveal({ ...activeReveal, phase: 'resolved', effect });
+  };
+
+  // Dismiss the resolved NPC event: acknowledge it server-side (the only
+  // thing that drops it out of unseenNpcEvents for good), keep it as the
   // recall strip, and let the claim effect pick up whatever's next.
-  const handleDismissNpcReveal = () => {
-    if (!revealingNpcEvent || !npcResolution) return;
+  const handleDismissResolved = () => {
+    if (!activeReveal || activeReveal.phase !== 'resolved') return;
+    const resolved = activeReveal;
+
     setLastNpcEvent({
-      delivery_id: revealingNpcEvent.delivery_id,
-      title: revealingNpcEvent.title,
-      image_path: revealingNpcEvent.image_path,
-      description: revealingNpcEvent.description,
-      chosen_option_label: npcResolution.label,
-      chosen_effect: npcResolution.effect,
+      delivery_id: resolved.deliveryId,
+      title: resolved.title,
+      image_path: resolved.imagePath,
+      description: resolved.description,
+      chosen_option_label: resolved.label,
+      chosen_effect: resolved.effect,
       resolved_at: new Date().toISOString(),
     });
-    setPendingNpcEvents((prev) => prev.filter((e) => e.delivery_id !== revealingNpcEvent.delivery_id));
-    setRevealingNpcEvent(null);
-    setNpcResolution(null);
+    setPendingNpcEvents((prev) => prev.filter((e) => e.delivery_id !== resolved.deliveryId));
+    setUnseenNpcEvents((prev) => prev.filter((e) => e.delivery_id !== resolved.deliveryId));
+    setDismissedAwaitingIds((prev) => {
+      if (!prev.has(resolved.deliveryId)) return prev;
+      const next = new Set(prev);
+      next.delete(resolved.deliveryId);
+      return next;
+    });
+    setActiveReveal(null);
+
+    if (!isDemoMode) {
+      supabase.rpc('acknowledge_npc_event', { p_delivery_id: resolved.deliveryId }).then(({ error }) => {
+        if (error) console.error('Could not acknowledge NPC event:', error);
+      });
+    }
   };
 
   const copyCode = (field: 'rejoin' | 'room', value: string) => {
@@ -1434,9 +1572,10 @@ export const PlayerApp: React.FC = () => {
         </div>
       )}
 
-      {/* NPC Event Reveal — pushed by the host, not drawn. Shows the scenario
-          and its options first; once one is chosen, swaps to the effect. */}
-      {revealingNpcEvent && (
+      {/* NPC Event Reveal — pushed by the host, not drawn. Three screens in
+          the same frame: choose an option, wait on a judged pick, or read
+          the effect once there is one. */}
+      {activeReveal && (
         <div className="board-scrim">
           <div className="relative max-w-sm w-full flex flex-col items-center animate-pop">
             <div className="chip bg-pip-gold mb-3">
@@ -1444,34 +1583,30 @@ export const PlayerApp: React.FC = () => {
             </div>
 
             <div className="frame w-full flex flex-col select-none">
-              {revealingNpcEvent.image_path && (
-                <div className="relative aspect-[4/3] w-full rounded-[0.7rem] overflow-hidden bg-parchment-100 mb-3">
-                  <img
-                    src={getNpcImageUrl(revealingNpcEvent.image_path)}
-                    alt={revealingNpcEvent.title}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
+              {(() => {
+                const imagePath = activeReveal.phase === 'choose' ? activeReveal.event.image_path : activeReveal.imagePath;
+                const title = activeReveal.phase === 'choose' ? activeReveal.event.title : activeReveal.title;
+                const description = activeReveal.phase === 'choose' ? activeReveal.event.description : activeReveal.description;
+                return (
+                  <>
+                    {imagePath && (
+                      <div className="relative aspect-[4/3] w-full rounded-[0.7rem] overflow-hidden bg-parchment-100 mb-3">
+                        <img src={getNpcImageUrl(imagePath)} alt={title} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <h3 className="font-display text-lg font-extrabold text-ink-800 text-center leading-tight mb-2">
+                      {title}
+                    </h3>
+                    <p className="text-sm font-semibold text-ink-700 text-left leading-snug mb-4 px-1 whitespace-pre-line">
+                      {description}
+                    </p>
+                  </>
+                );
+              })()}
 
-              <h3 className="font-display text-lg font-extrabold text-ink-800 text-center leading-tight mb-2">
-                {revealingNpcEvent.title}
-              </h3>
-
-              <p className="text-sm font-semibold text-ink-700 text-left leading-snug mb-4 px-1 whitespace-pre-line">
-                {revealingNpcEvent.description}
-              </p>
-
-              {npcResolution ? (
-                <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left">
-                  <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500 mb-1.5">
-                    You chose: {npcResolution.label}
-                  </p>
-                  <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{npcResolution.effect}</p>
-                </div>
-              ) : (
+              {activeReveal.phase === 'choose' && (
                 <div className="space-y-2">
-                  {revealingNpcEvent.options.map((option) => (
+                  {activeReveal.event.options.map((option) => (
                     <button
                       key={option.id}
                       onClick={() => handleChooseNpcOption(option.id)}
@@ -1483,11 +1618,51 @@ export const PlayerApp: React.FC = () => {
                   ))}
                 </div>
               )}
+
+              {activeReveal.phase === 'awaiting' && (
+                <div className="slab p-4 text-left space-y-3">
+                  <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500">
+                    You chose: {activeReveal.label}
+                  </p>
+                  <p className="text-sm font-semibold text-ink-700 leading-snug flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-pip-gold border-2 border-ink-900 animate-pulse shrink-0" />
+                    Your host is deciding what happens next…
+                  </p>
+                  {isDemoMode && (
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => handleDemoJudge('success')} className="btn-leaf flex-1 !py-2 !text-xs">
+                        Demo: Success
+                      </button>
+                      <button onClick={() => handleDemoJudge('failure')} className="btn-danger flex-1 !py-2 !text-xs">
+                        Demo: Failure
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeReveal.phase === 'resolved' && (
+                <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left">
+                  <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500 mb-1.5">
+                    You chose: {activeReveal.label}
+                  </p>
+                  <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{activeReveal.effect}</p>
+                </div>
+              )}
             </div>
 
-            {npcResolution && (
+            {activeReveal.phase === 'awaiting' && (
               <button
-                onClick={handleDismissNpcReveal}
+                onClick={handleDismissAwaiting}
+                className="btn-paper w-full max-w-[340px] !py-3 !text-sm mt-3"
+              >
+                OK, I'll wait
+              </button>
+            )}
+
+            {activeReveal.phase === 'resolved' && (
+              <button
+                onClick={handleDismissResolved}
                 className="btn-violet w-full max-w-[340px] !py-3 !text-sm mt-3"
               >
                 Continue
