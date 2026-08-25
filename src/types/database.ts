@@ -76,6 +76,76 @@ export interface PendingAction {
   revoked_at?: string | null;
 }
 
+/** One selectable choice inside a scenario. `effect` is only ever seen by the
+ *  host catalog and by the player after they've picked it — a pending
+ *  delivery only carries `label`. */
+export interface NpcEventOption {
+  id: string;
+  scenario_id: string;
+  label: string;
+  effect: string;
+  sort_order: number;
+}
+
+/** One of the situations that can come up for an NPC event. */
+export interface NpcEventScenario {
+  id: string;
+  npc_event_id: string;
+  description: string;
+  weight: number;
+  active: boolean;
+  options: NpcEventOption[];
+}
+
+/** The NPC event itself, as the host's catalog sees it — every scenario and
+ *  option nested underneath, image and all. Never sent to a player. */
+export interface NpcEventCatalogEntry {
+  id: string;
+  title: string;
+  image_path: string | null;
+  active: boolean;
+  scenarios: NpcEventScenario[];
+}
+
+/** What a player sees while a delivery is unresolved — the scenario's
+ *  description and the option labels, but no effect text yet. */
+export interface PendingNpcEvent {
+  delivery_id: string;
+  npc_event_id: string;
+  title: string;
+  image_path: string | null;
+  scenario_id: string;
+  description: string;
+  options: Array<{ id: string; label: string }>;
+  issued_at: string;
+}
+
+/** What's left once the player has chosen — the effect they read, kept for
+ *  the recall strip after the reveal is dismissed. */
+export interface ResolvedNpcEvent {
+  delivery_id: string;
+  title: string;
+  image_path: string | null;
+  description: string;
+  chosen_option_label: string;
+  chosen_effect: string;
+  resolved_at: string;
+}
+
+/** A row in the host's room-wide NPC event feed — resolved or still pending. */
+export interface RoomNpcDelivery {
+  delivery_id: string;
+  player_id: string;
+  npc_event_id: string;
+  title: string;
+  image_path: string | null;
+  description: string;
+  chosen_option_label: string | null;
+  chosen_effect: string | null;
+  issued_at: string;
+  resolved_at: string | null;
+}
+
 export interface CommandLogEntry {
   seq: number;
   room_code: string;

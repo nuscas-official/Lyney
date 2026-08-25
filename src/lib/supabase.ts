@@ -79,3 +79,36 @@ export async function listAvatarPaths(): Promise<string[]> {
     return FALLBACK_AVATARS;
   }
 }
+
+/** Resolve a stored NPC portrait path to something an <img> can load. Same
+ *  shape as getAvatarUrl -- paths that already look like URLs pass through. */
+export function getNpcImageUrl(imagePath: string): string {
+  if (!imagePath) return '';
+  if (isDemoMode || imagePath.startsWith('/') || imagePath.startsWith('http')) {
+    return imagePath;
+  }
+  const { data } = supabase.storage.from('npc-images').getPublicUrl(imagePath);
+  return data.publicUrl;
+}
+
+/** The portraits on offer when the host is building the NPC catalog: whatever
+ *  is in the npc-images bucket. Uploading a file there is the whole workflow
+ *  for adding one, the same as avatars. */
+export async function listNpcImagePaths(): Promise<string[]> {
+  if (isDemoMode) return [];
+
+  try {
+    const { data, error } = await supabase.storage.from('npc-images').list('', {
+      limit: 100,
+      sortBy: { column: 'name', order: 'asc' },
+    });
+    if (error) throw error;
+
+    return (data ?? [])
+      .map((f) => f.name)
+      .filter((name) => AVATAR_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext)));
+  } catch (err) {
+    console.error('Could not list NPC portraits:', err);
+    return [];
+  }
+}
