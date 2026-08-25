@@ -7,26 +7,22 @@
    ========================================================================== */
 
 export const RACE_OPTIONS = [
-  'Primogem',
   'Human',
-  'Adeptus',
-  'Fatui Agent',
-  'Elemental Life-Form',
+  'Fae',
+  'Dodoco',
   'Automaton',
-  'Hilichurl',
   'Slime',
-  'Classified',
+  'Adeptus',
+  'Primogem',
 ] as const;
 
 export const CODENAME_OPTIONS = [
+  'Wayfarer',
+  'Chest Mimic',
+  'Seamount Abyss',
   'The 12th',
-  'The 13th',
-  'The Understudy',
-  'The Spare',
-  'The New Guy',
-  'The Intern',
-  'The Tourist',
-  'The Volunteer',
+  'King Jabberfries!',
+  'Lord of the Seven Calamities',
   '[Redacted]',
 ] as const;
 
