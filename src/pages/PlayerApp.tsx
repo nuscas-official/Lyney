@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
   Trash2, X, Copy, ShieldAlert, ArrowLeft, ArrowRight, Plus, Minus, LogOut, Zap,
-  ChevronDown, Check, Hash, Ghost,
+  ChevronDown, Check, Hash, Ghost, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
@@ -76,12 +76,23 @@ const DEMO_JUDGED_EFFECTS: Record<string, { success: string; failure: string }> 
  *  not a live view of pendingNpcEvents/unseenNpcEvents, so a poll landing
  *  mid-read can't change what's displayed out from under the player.
  *  `effect` is always the prompt text (the whole outcome for a fixed pick,
- *  just the "what's happening" text for a judged one); `outcomeEffect` is
- *  the success/failure text, present only once a judged pick is resolved. */
+ *  just the "what's happening" text for a judged one); `outcome` and
+ *  `outcomeEffect` are the host's ruling and its text, both null for a fixed
+ *  pick and present together only once a judged pick is resolved. */
 type ActiveNpcReveal =
   | { phase: 'choose'; event: PendingNpcEvent }
   | { phase: 'awaiting'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string; effect: string }
-  | { phase: 'resolved'; deliveryId: string; title: string; imagePath: string | null; description: string; label: string; effect: string; outcomeEffect: string | null };
+  | {
+      phase: 'resolved';
+      deliveryId: string;
+      title: string;
+      imagePath: string | null;
+      description: string;
+      label: string;
+      effect: string;
+      outcome: 'success' | 'failure' | null;
+      outcomeEffect: string | null;
+    };
 
 /** Everything the information collection form asks a new player for. */
 interface NewPlayerProfile {
@@ -167,6 +178,20 @@ const SelectField: React.FC<{
     </div>
   </div>
 );
+
+/** Explicit "Success"/"Failure" label for a judged NPC event outcome -- the
+ *  outcome text alone doesn't always make which one it was obvious at a
+ *  glance, so this says it plainly. */
+const NpcOutcomeBadge: React.FC<{ outcome: 'success' | 'failure' }> = ({ outcome }) =>
+  outcome === 'success' ? (
+    <span className="chip bg-pip-leaf">
+      <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={2.75} /> Success
+    </span>
+  ) : (
+    <span className="chip bg-pip-red text-white">
+      <XCircle className="w-3.5 h-3.5" strokeWidth={2.75} /> Failure
+    </span>
+  );
 
 export const PlayerApp: React.FC = () => {
   // Session & Player state
@@ -277,6 +302,7 @@ export const PlayerApp: React.FC = () => {
             description: next.description,
             label: next.chosen_option_label,
             effect: next.effect,
+            outcome: next.outcome,
             outcomeEffect: next.outcome_effect,
           }
     );
@@ -893,6 +919,7 @@ export const PlayerApp: React.FC = () => {
           description: event.description,
           label: option.label,
           effect: DEMO_NPC_OPTION_EFFECTS[optionId] || 'Nothing happens.',
+          outcome: null,
           outcomeEffect: null,
         });
       }
@@ -937,6 +964,7 @@ export const PlayerApp: React.FC = () => {
               description: event.description,
               label: data.label,
               effect: data.effect,
+              outcome: null,
               outcomeEffect: null,
             }
       );
@@ -961,7 +989,7 @@ export const PlayerApp: React.FC = () => {
   const handleDemoJudge = (outcome: 'success' | 'failure') => {
     if (!activeReveal || activeReveal.phase !== 'awaiting') return;
     const outcomeEffect = DEMO_JUDGED_EFFECTS.o6?.[outcome] || 'Nothing happens.';
-    setActiveReveal({ ...activeReveal, phase: 'resolved', outcomeEffect });
+    setActiveReveal({ ...activeReveal, phase: 'resolved', outcome, outcomeEffect });
   };
 
   // Dismiss the resolved NPC event: acknowledge it server-side (the only
@@ -978,6 +1006,7 @@ export const PlayerApp: React.FC = () => {
       description: resolved.description,
       chosen_option_label: resolved.label,
       effect: resolved.effect,
+      outcome: resolved.outcome,
       outcome_effect: resolved.outcomeEffect,
       resolved_at: new Date().toISOString(),
     });
@@ -1664,10 +1693,15 @@ export const PlayerApp: React.FC = () => {
                     You chose: {activeReveal.label}
                   </p>
                   <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{activeReveal.effect}</p>
-                  {activeReveal.outcomeEffect && (
-                    <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line pt-2 border-t-2 border-dashed border-ink-900/20">
-                      {activeReveal.outcomeEffect}
-                    </p>
+                  {activeReveal.outcome && (
+                    <div className="pt-2 border-t-2 border-dashed border-ink-900/20 space-y-1.5">
+                      <NpcOutcomeBadge outcome={activeReveal.outcome} />
+                      {activeReveal.outcomeEffect && (
+                        <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">
+                          {activeReveal.outcomeEffect}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -1726,10 +1760,15 @@ export const PlayerApp: React.FC = () => {
                   You chose: {lastNpcEvent.chosen_option_label}
                 </p>
                 <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{lastNpcEvent.effect}</p>
-                {lastNpcEvent.outcome_effect && (
-                  <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line pt-2 border-t-2 border-dashed border-ink-900/20">
-                    {lastNpcEvent.outcome_effect}
-                  </p>
+                {lastNpcEvent.outcome && (
+                  <div className="pt-2 border-t-2 border-dashed border-ink-900/20 space-y-1.5">
+                    <NpcOutcomeBadge outcome={lastNpcEvent.outcome} />
+                    {lastNpcEvent.outcome_effect && (
+                      <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">
+                        {lastNpcEvent.outcome_effect}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

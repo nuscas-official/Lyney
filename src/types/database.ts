@@ -150,14 +150,19 @@ export interface UnseenNpcEvent {
   chosen_option_label: string;
   effect: string;
   state: 'awaiting' | 'resolved';
+  /** Null for a fixed pick (no such distinction) or while still 'awaiting';
+   *  'success'/'failure' once the host has ruled -- lets the reveal say
+   *  which one explicitly rather than leaving it to the text alone. */
+  outcome: 'success' | 'failure' | null;
   outcome_effect: string | null;
   chosen_at: string;
   resolved_at: string | null;
 }
 
 /** What's left once the player has seen the outcome — kept for the recall
- *  strip after the reveal is dismissed and acknowledged. `outcome_effect` is
- *  null for a fixed pick, whose `effect` already was the whole outcome. */
+ *  strip after the reveal is dismissed and acknowledged. `outcome`/
+ *  `outcome_effect` are null for a fixed pick, whose `effect` already was
+ *  the whole outcome. */
 export interface ResolvedNpcEvent {
   delivery_id: string;
   title: string;
@@ -165,6 +170,7 @@ export interface ResolvedNpcEvent {
   description: string;
   chosen_option_label: string;
   effect: string;
+  outcome: 'success' | 'failure' | null;
   outcome_effect: string | null;
   resolved_at: string;
 }

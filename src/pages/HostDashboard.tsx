@@ -1601,57 +1601,72 @@ export const HostDashboard: React.FC = () => {
                   title="NPC events"
                   subtitle="Who has one pending, and what everyone chose"
                 />
-                <div className="flex flex-wrap gap-1.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   {npcDeliveries.map((d) => {
                     const player = players.find((p) => p.id === d.player_id);
                     // Three states: nobody's picked yet, somebody picked a
                     // judged option and it's this host's call, or it's done.
-                    const awaitingJudgement = !!d.chosen_option_label && !d.resolved_at && d.outcome_mode === 'judged';
+                    const pending = !d.chosen_option_label;
+                    const awaitingJudgement = !pending && !d.resolved_at && d.outcome_mode === 'judged';
 
-                    if (awaitingJudgement) {
-                      return (
-                        <div key={d.delivery_id} className="chip bg-pip-violet text-white !py-1 flex-col !items-start gap-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate max-w-[100px] opacity-80">{player?.name || 'Unknown player'}</span>
-                            <span className="truncate max-w-[140px] font-extrabold">{d.chosen_option_label}</span>
-                          </div>
-                          {d.effect && (
-                            <p className="text-[10px] font-semibold opacity-80 max-w-[260px] whitespace-pre-line">{d.effect}</p>
-                          )}
-                          <div className="flex items-center gap-1">
+                    return (
+                      <div
+                        key={d.delivery_id}
+                        className={`slab p-3 space-y-1.5 ${
+                          awaitingJudgement
+                            ? '!border-pip-violet bg-pip-violet/5'
+                            : d.resolved_at
+                              ? '!border-pip-gold bg-pip-gold/5'
+                              : 'animate-pulse'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-display font-extrabold text-xs text-ink-800 truncate">
+                            {player?.name || 'Unknown player'}
+                          </span>
+                          <PaperChip tone={awaitingJudgement ? 'violet' : d.resolved_at ? 'gold' : 'paper'}>
+                            {awaitingJudgement ? 'Awaiting' : d.resolved_at ? 'Resolved' : 'Pending'}
+                          </PaperChip>
+                        </div>
+
+                        <p className="text-[11px] font-semibold text-ink-500 truncate">{d.title}</p>
+
+                        {pending ? (
+                          <p className="text-[11px] font-semibold italic text-ink-400">Waiting on the player…</p>
+                        ) : (
+                          <p className="text-xs font-extrabold text-ink-800 truncate">{d.chosen_option_label}</p>
+                        )}
+
+                        {!pending && d.effect && (
+                          <p className="text-[11px] font-semibold text-ink-500 leading-snug whitespace-pre-line">{d.effect}</p>
+                        )}
+
+                        {awaitingJudgement ? (
+                          <div className="flex items-center gap-1.5 pt-1">
                             <button
                               onClick={() => handleJudgeNpcEvent(d, 'success')}
-                              className="chip !py-0.5 !px-2 bg-pip-leaf !text-[10px] hover:brightness-105 active:translate-y-px"
+                              className="chip !py-1 flex-1 justify-center bg-pip-leaf hover:brightness-105 active:translate-y-px"
                               title={d.success_effect || ''}
                             >
                               <CheckCircle2 className="w-3 h-3" strokeWidth={2.75} /> Success
                             </button>
                             <button
                               onClick={() => handleJudgeNpcEvent(d, 'failure')}
-                              className="chip !py-0.5 !px-2 bg-pip-red text-white !text-[10px] hover:brightness-105 active:translate-y-px"
+                              className="chip !py-1 flex-1 justify-center bg-pip-red text-white hover:brightness-105 active:translate-y-px"
                               title={d.failure_effect || ''}
                             >
                               <XCircle className="w-3 h-3" strokeWidth={2.75} /> Failure
                             </button>
                           </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <span
-                        key={d.delivery_id}
-                        className={`chip ${d.resolved_at ? 'bg-pip-gold' : 'bg-white animate-pulse'}`}
-                        title={d.resolved_at ? `${d.chosen_option_label}: ${d.chosen_effect}` : 'Waiting on the player'}
-                      >
-                        <span className="truncate max-w-[100px] opacity-80">{player?.name || 'Unknown player'}</span>
-                        <span className="truncate max-w-[140px]">{d.title}</span>
-                        {d.resolved_at ? (
-                          <span className="truncate max-w-[120px] font-extrabold">{d.chosen_option_label}</span>
                         ) : (
-                          <span className="italic opacity-70">pending…</span>
+                          d.resolved_at &&
+                          d.outcome_mode === 'judged' && (
+                            <p className="text-[11px] font-semibold text-ink-500 leading-snug whitespace-pre-line pt-1 border-t-2 border-dashed border-ink-900/15">
+                              {d.chosen_effect}
+                            </p>
+                          )
                         )}
-                      </span>
+                      </div>
                     );
                   })}
                 </div>
