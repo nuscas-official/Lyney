@@ -41,6 +41,8 @@ export interface Player {
   reason?: string | null;
   /** Object name in the `avatars` bucket, or a bundled fallback path. */
   avatar_path?: string | null;
+  /** Scoreboard total the host nudges via adjust_points. No floor. */
+  points: number;
 }
 
 export interface HeldCard {

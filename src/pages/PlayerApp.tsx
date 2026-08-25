@@ -970,7 +970,7 @@ export const PlayerApp: React.FC = () => {
       <header className="sticky top-0 z-40 path-strip border-b-[3px] border-ink-900 pl-4 pr-16 py-3 flex items-center justify-between gap-3">
         {/* Left: who you are -- avatar, name, and a tap-to-copy chip for the
             code that gets you back here if this device loses the session. */}
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={() => setShowCodeModal(true)}
@@ -979,7 +979,7 @@ export const PlayerApp: React.FC = () => {
           >
             <Standee
               name={joinedPlayer.name}
-              size="md"
+              size="lg"
               imageSrc={joinedPlayer.avatar_path ? getAvatarUrl(joinedPlayer.avatar_path) : undefined}
             />
           </button>

@@ -21,16 +21,17 @@ const TONE_FILL: Record<TokenTone, string> = {
   paper:   'bg-parchment-100 text-ink-700',
 };
 
-const SIZE: Record<'xs' | 'sm' | 'md' | 'lg', { box: string; icon: string; text: string }> = {
+const SIZE: Record<'xs' | 'sm' | 'md' | 'lg' | 'xl', { box: string; icon: string; text: string }> = {
   xs: { box: 'w-6 h-6',   icon: 'w-3 h-3',     text: 'text-[10px]' },
   sm: { box: 'w-8 h-8',   icon: 'w-4 h-4',     text: 'text-xs' },
-  md: { box: 'w-11 h-11', icon: 'w-5 h-5',     text: 'text-sm' },
-  lg: { box: 'w-16 h-16', icon: 'w-7 h-7',     text: 'text-lg' },
+  md: { box: 'w-12 h-12', icon: 'w-6 h-6',     text: 'text-sm' },
+  lg: { box: 'w-16 h-16', icon: 'w-8 h-8',     text: 'text-lg' },
+  xl: { box: 'w-20 h-20', icon: 'w-10 h-10',   text: 'text-xl' },
 };
 
 interface TokenProps {
   tone?: TokenTone;
-  size?: 'xs' | 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   icon?: LucideIcon;
   imageSrc?: string;
   /** Short text instead of an icon, e.g. "+1" or "!" */
@@ -86,7 +87,7 @@ const toneForName = (name: string) => {
 
 interface StandeeProps {
   name: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   muted?: boolean;
   className?: string;
   /** The player's chosen profile icon. Falls back to their initial, which is
@@ -104,12 +105,12 @@ export const Standee: React.FC<StandeeProps> = ({
   className = '',
   imageSrc,
 }) => {
-  const s = SIZE[size === 'lg' ? 'lg' : size];
+  const s = SIZE[size];
   const initial = (name || '?').trim().charAt(0).toUpperCase();
   return (
     <span
       className={`token ${imageSrc ? 'bg-parchment-100' : toneForName(name)} ${s.box}
-                  ${size === 'lg' ? 'text-xl' : 'text-base'} overflow-hidden
+                  ${size === 'xl' ? 'text-2xl' : size === 'lg' ? 'text-xl' : size === 'md' ? 'text-base' : 'text-xs'} overflow-hidden
                   ${muted ? 'grayscale opacity-60' : ''} ${className}`}
     >
       {imageSrc ? (

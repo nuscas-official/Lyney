@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Shield, Users, Layers, RotateCcw, Plus, Trash2,
-  UserX, UserCheck, RefreshCw, Sliders, X, Zap,
+  Shield, Users, Layers, RotateCcw, Plus, Minus, Trash2,
+  UserX, UserCheck, RefreshCw, Sliders, X, Zap, Star,
 } from 'lucide-react';
 import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl } from '../lib/supabase';
 import { Token, Standee, PaperChip, BoardHeading } from '../components/BoardBits';
@@ -34,6 +34,7 @@ interface HostPlayer {
   race?: string | null;
   reason?: string | null;
   avatar_path?: string | null;
+  points: number;
   hand: Array<{
     held_card_id: string;
     card_id: string;
@@ -58,16 +59,20 @@ interface RoomEvent {
 const INITIAL_DEMO_PLAYERS: HostPlayer[] = [
   { id: 'p1', name: 'Alex Morgan', player_code: 'K7M-4QP', active: true,
     codename: 'The 12th', race: 'Primogem', reason: 'I need a part-time job',
-    avatar_path: '/images/lyney.webp', hand: [
+    avatar_path: '/images/lyney.webp', points: 3, hand: [
     { held_card_id: 'h1', card_id: 'c1', title: 'Shield of Faith', image_path: INITIAL_DEMO_CARDS[0].image_path, source: 'draw' }
   ], hasActedInWindow: true },
   { id: 'p2', name: 'Jordan Lee', player_code: '9X2-B7L', active: true,
     codename: 'The Understudy', race: 'Human', reason: 'Mom told me to give it a try',
-    avatar_path: '/images/lynette.webp', hand: [], hasActedInWindow: false },
-  { id: 'p3', name: 'Sam Taylor', player_code: 'R4W-8TN', active: true, hand: [
+    avatar_path: '/images/lynette.webp', points: 0, hand: [], hasActedInWindow: false },
+  { id: 'p3', name: 'Sam Taylor', player_code: 'R4W-8TN', active: true, points: -1, hand: [
     { held_card_id: 'h3', card_id: 'c2', title: 'Phoenix Flame', image_path: INITIAL_DEMO_CARDS[1].image_path, source: 'grant' }
   ], hasActedInWindow: true }
 ];
+
+// The amounts that get a one-tap preset button, smallest first so the −5/−10
+// and +5/+10 pairs read outward from the points total like a number line.
+const POINT_PRESETS = [5, 10];
 
 const HOST_SESSION_KEY = 'lyney_host_session';
 
@@ -102,6 +107,11 @@ export const HostDashboard: React.FC = () => {
   const [selectedPlayer, setSelectedPlayer] = useState<HostPlayer | null>(null);
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [selectedGrantCardId, setSelectedGrantCardId] = useState('');
+
+  // How many points the +/- buttons move by, per player. Keyed by player id
+  // so adjusting one player's step doesn't disturb another's mid-session.
+  const [pointSteps, setPointSteps] = useState<Record<string, number>>({});
+  const getPointStep = (playerId: string) => pointSteps[playerId] ?? 1;
 
 
   // Fetch real room data from Supabase via host_get_room RPC
@@ -157,6 +167,7 @@ export const HostDashboard: React.FC = () => {
           race: p.race ?? null,
           reason: p.reason ?? null,
           avatar_path: p.avatar_path ?? null,
+          points: p.points ?? 0,
           hand: playerHeld,
           hasActedInWindow: playerPending.length === 0,
         };
@@ -496,6 +507,35 @@ export const HostDashboard: React.FC = () => {
       }
     } catch (err: any) {
       alert(err.message || 'Failed to grant card');
+    }
+  };
+
+  // Host Adjust Points — delta may be negative to subtract
+  const handleAdjustPoints = async (playerId: string, delta: number) => {
+    if (!delta) return;
+    const player = players.find((p) => p.id === playerId);
+
+    if (isDemoMode) {
+      setPlayers((prev) =>
+        prev.map((p) => (p.id === playerId ? { ...p, points: p.points + delta } : p))
+      );
+      setLastActionText(`${delta > 0 ? 'Added' : 'Subtracted'} ${Math.abs(delta)} point${Math.abs(delta) === 1 ? '' : 's'}${player ? ` for ${player.name}` : ''}`);
+      return;
+    }
+
+    try {
+      const { error } = await supabase.rpc('adjust_points', {
+        p_player_id: playerId,
+        p_delta: delta,
+      });
+      if (error) {
+        alert(error.message);
+      } else {
+        setLastActionText(`${delta > 0 ? 'Added' : 'Subtracted'} ${Math.abs(delta)} point${Math.abs(delta) === 1 ? '' : 's'}${player ? ` for ${player.name}` : ''}`);
+        fetchRoomData();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to adjust points');
     }
   };
 
@@ -1073,10 +1113,10 @@ export const HostDashboard: React.FC = () => {
                       >
                         {/* Player Row Header */}
                         <div className="flex items-start justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="flex items-center gap-3 min-w-0">
                             <Standee
                               name={player.name}
-                              size="sm"
+                              size="md"
                               muted={!player.active}
                               imageSrc={player.avatar_path ? getAvatarUrl(player.avatar_path) : undefined}
                             />
@@ -1129,6 +1169,79 @@ export const HostDashboard: React.FC = () => {
                               </button>
                             )}
                           </div>
+                        </div>
+
+                        {/* Points */}
+                        <div className="mb-3 slab px-2.5 py-2 space-y-2">
+                          <div className="flex items-center gap-1.5">
+                            <Star className="w-3.5 h-3.5 text-pip-gold" strokeWidth={2.75} />
+                            <span className="font-display font-bold text-[11px] uppercase tracking-wide text-ink-400">
+                              Points
+                            </span>
+                            <span className="font-display font-extrabold text-base text-ink-800 tabular-nums">
+                              {player.points}
+                            </span>
+                          </div>
+
+                          {player.active && (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {/* +5 / +10 cover almost every award or penalty, so
+                                  they get one-tap buttons instead of dialing the
+                                  custom stepper up each time. */}
+                              {POINT_PRESETS.map((n) => (
+                                <button
+                                  key={`-${n}`}
+                                  onClick={() => handleAdjustPoints(player.id, -n)}
+                                  className="chip !py-1 bg-white hover:!bg-pip-red hover:!text-white active:translate-y-px transition-colors"
+                                  title={`Subtract ${n}`}
+                                >
+                                  −{n}
+                                </button>
+                              ))}
+                              {POINT_PRESETS.map((n) => (
+                                <button
+                                  key={`+${n}`}
+                                  onClick={() => handleAdjustPoints(player.id, n)}
+                                  className="chip !py-1 bg-white hover:!bg-pip-leaf active:translate-y-px transition-colors"
+                                  title={`Add ${n}`}
+                                >
+                                  +{n}
+                                </button>
+                              ))}
+
+                              {/* Custom amount, for anything the presets don't cover */}
+                              <div className="flex items-center gap-1 ml-auto">
+                                <button
+                                  onClick={() => handleAdjustPoints(player.id, -getPointStep(player.id))}
+                                  className="btn-icon !w-7 !h-7 hover:!bg-pip-red hover:!text-white"
+                                  title={`Subtract ${getPointStep(player.id)} (custom)`}
+                                >
+                                  <Minus className="w-3.5 h-3.5" strokeWidth={3} />
+                                </button>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={getPointStep(player.id)}
+                                  onChange={(e) => {
+                                    const parsed = parseInt(e.target.value, 10);
+                                    setPointSteps((prev) => ({
+                                      ...prev,
+                                      [player.id]: Number.isNaN(parsed) ? 1 : Math.max(1, parsed),
+                                    }));
+                                  }}
+                                  className="field !w-11 !px-1 !py-1 !text-center !text-xs"
+                                  title="Custom amount"
+                                />
+                                <button
+                                  onClick={() => handleAdjustPoints(player.id, getPointStep(player.id))}
+                                  className="btn-icon !w-7 !h-7 hover:!bg-pip-leaf"
+                                  title={`Add ${getPointStep(player.id)} (custom)`}
+                                >
+                                  <Plus className="w-3.5 h-3.5" strokeWidth={3} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Player Hand Thumbnails */}
