@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
   Key, User, Layers, WifiOff, AlertTriangle, CheckCircle,
   Trash2, X, Copy, ShieldAlert, ArrowLeft, ArrowRight, Plus, Minus, LogOut, Zap,
-  ChevronDown, Check, Hash, Star,
+  ChevronDown, Check, Hash, Ghost,
 } from 'lucide-react';
 import { CardView } from '../components/CardView';
 import { Token, Standee } from '../components/BoardBits';
-import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl, listAvatarPaths } from '../lib/supabase';
-import { CardKind, DrawPool, EventDraw, HeldCard } from '../types/database';
+import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl, listAvatarPaths, getNpcImageUrl } from '../lib/supabase';
+import { CardKind, DrawPool, EventDraw, HeldCard, PendingNpcEvent, ResolvedNpcEvent } from '../types/database';
 import { CODENAME_OPTIONS, RACE_OPTIONS, REASON_OPTIONS } from '../lib/profile';
 import {
   DRAW_POOLS, KIND_LABEL, POOL_BUTTON, POOL_DRAW_PHRASE, POOL_KINDS, POOL_LABEL, POOL_TONE,
@@ -30,6 +30,30 @@ const DEMO_CARDS: Array<{ id: string; title: string; image_path: string; kind: C
 
 // The rejoin codes the demo build pretends to know about.
 const DEMO_REJOIN_CODES = ['K7M4QP', 'K7M-4QP', 'DEMO12'];
+
+// A sample NPC event delivery for the demo build's "queue an NPC event"
+// button. Effects are kept out of PendingNpcEvent (the reveal doesn't carry
+// them until resolved server-side), so this map stands in for that RPC round
+// trip in demo mode.
+const DEMO_NPC_EVENT: PendingNpcEvent = {
+  delivery_id: 'npc-demo-1',
+  npc_event_id: 'npc1',
+  title: 'The Wandering Merchant',
+  image_path: null,
+  scenario_id: 'sc1',
+  description: 'A cloaked trader offers you a curious vial for a steep price.',
+  options: [
+    { id: 'o1', label: 'Buy it' },
+    { id: 'o2', label: 'Haggle' },
+    { id: 'o3', label: 'Walk away' },
+  ],
+  issued_at: new Date().toISOString(),
+};
+const DEMO_NPC_OPTION_EFFECTS: Record<string, string> = {
+  o1: 'The vial fizzes strangely — you feel lucky.',
+  o2: 'The merchant halves the price, grumbling.',
+  o3: 'The merchant shrugs and vanishes into the crowd.',
+};
 
 /** Everything the information collection form asks a new player for. */
 interface NewPlayerProfile {
@@ -161,6 +185,31 @@ export const PlayerApp: React.FC = () => {
   // this screen; lastEvent keeps the most recent one reachable after a refresh.
   const [revealedEvent, setRevealedEvent] = useState<EventDraw | null>(null);
   const [lastEvent, setLastEvent] = useState<EventDraw | null>(null);
+  // NPC events arrive pushed by the host rather than drawn, so the reveal
+  // modal renders the moment the queue is non-empty -- it doesn't wait for a
+  // button tap. `revealingNpcEvent` snapshots the head of the queue once
+  // claimed for display, decoupled from later polls/realtime updates to
+  // `pendingNpcEvents` (the server already drops a delivery from that list
+  // the instant it's resolved, which would otherwise yank the modal's content
+  // out from under the effect the player is still reading). npcResolution
+  // holds the chosen option's effect once picked, swapping the modal from
+  // "choose" to "here's what happened" before it's dismissed into
+  // lastNpcEvent's recall strip.
+  const [pendingNpcEvents, setPendingNpcEvents] = useState<PendingNpcEvent[]>([]);
+  const [revealingNpcEvent, setRevealingNpcEvent] = useState<PendingNpcEvent | null>(null);
+  const [npcResolution, setNpcResolution] = useState<{ label: string; effect: string } | null>(null);
+  const [isResolvingNpcEvent, setIsResolvingNpcEvent] = useState(false);
+  const [lastNpcEvent, setLastNpcEvent] = useState<ResolvedNpcEvent | null>(null);
+  const [showLastNpcEvent, setShowLastNpcEvent] = useState(false);
+
+  // Claim the next queued NPC event for display once nothing is currently
+  // being shown/resolved. Runs after every pendingNpcEvents update (a fresh
+  // push from the host, or the queue shrinking once a dismiss clears the head).
+  useEffect(() => {
+    if (!revealingNpcEvent && !npcResolution && pendingNpcEvents.length > 0) {
+      setRevealingNpcEvent(pendingNpcEvents[0]);
+    }
+  }, [pendingNpcEvents, revealingNpcEvent, npcResolution]);
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [isRemoved, setIsRemoved] = useState(false);
   const [copiedField, setCopiedField] = useState<'rejoin' | 'room' | null>(null);
@@ -237,6 +286,10 @@ export const PlayerApp: React.FC = () => {
     setHand([]);
     setRevealedEvent(null);
     setLastEvent(null);
+    setPendingNpcEvents([]);
+    setRevealingNpcEvent(null);
+    setNpcResolution(null);
+    setLastNpcEvent(null);
     setErrorMsg(null);
   };
 
@@ -300,6 +353,12 @@ export const PlayerApp: React.FC = () => {
         setHand(data.hand);
       }
       setLastEvent(data?.last_event ?? null);
+      // The reveal modal reads from revealingNpcEvent/npcResolution, both
+      // local and untouched here, so a poll landing mid-reveal can't yank
+      // content out from under it -- these two are just server truth for the
+      // queue and the recall strip.
+      setPendingNpcEvents(data?.pending_npc_events ?? []);
+      setLastNpcEvent(data?.last_npc_event ?? null);
       // The host can nudge points from their console at any time -- a plain
       // rejoin already returns the player's current row, so a refresh is
       // enough to pick up a change without a dedicated realtime channel.
@@ -401,6 +460,8 @@ export const PlayerApp: React.FC = () => {
         // Event cards leave no row in held_cards, so an event the host draws
         // for this player shows up nowhere else.
         .on('postgres_changes', { event: '*', schema: 'public', table: 'command_log', filter: `player_id=eq.${id}` }, refresh)
+        // An NPC event the host triggers for this player arrives here.
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'npc_event_deliveries', filter: `player_id=eq.${id}` }, refresh)
         .subscribe((status) => {
           const wasHealthy = socketHealthy;
           socketHealthy = status === 'SUBSCRIBED';
@@ -485,6 +546,8 @@ export const PlayerApp: React.FC = () => {
     setJoinedPlayer(pData);
     setHand(data.hand || []);
     setLastEvent(data.last_event ?? null);
+    setPendingNpcEvents(data.pending_npc_events || []);
+    setLastNpcEvent(data.last_npc_event ?? null);
     localStorage.setItem('lyney_player_session', JSON.stringify({ player: pData }));
     fetchRoomLabel(pData.room_code);
     runPreload();
@@ -721,6 +784,64 @@ export const PlayerApp: React.FC = () => {
     } finally {
       setCardToDiscard(null);
     }
+  };
+
+  // Choose an option for the NPC event currently being revealed. The effect
+  // text only exists server-side until this call returns it -- that's the
+  // suspense the pending queue deliberately withholds.
+  const handleChooseNpcOption = async (optionId: string) => {
+    if (!revealingNpcEvent || isResolvingNpcEvent) return;
+
+    if (isDemoMode) {
+      const option = revealingNpcEvent.options.find((o) => o.id === optionId);
+      if (!option) return;
+      setNpcResolution({ label: option.label, effect: DEMO_NPC_OPTION_EFFECTS[optionId] || 'Nothing happens.' });
+      return;
+    }
+
+    setIsResolvingNpcEvent(true);
+    try {
+      const { data, error } = await supabase.rpc('resolve_npc_event', {
+        p_delivery_id: revealingNpcEvent.delivery_id,
+        p_option_id: optionId,
+      });
+
+      if (error) {
+        if (error.code === 'P0034' || error.code === 'P0029' || error.message.includes('already_resolved') || error.message.includes('not_found')) {
+          // The host undid the trigger, or another tab already resolved it --
+          // either way there's nothing left to reveal.
+          setRevealingNpcEvent(null);
+          setErrorMsg('That event is no longer waiting on you.');
+        } else {
+          setErrorMsg(error.message);
+        }
+        return;
+      }
+
+      setNpcResolution({ label: data.label, effect: data.effect });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Could not resolve that choice');
+    } finally {
+      setIsResolvingNpcEvent(false);
+    }
+  };
+
+  // Dismiss the resolved NPC event: drop it from the queue, keep it as the
+  // recall strip, and let the claim effect pick up whatever's next.
+  const handleDismissNpcReveal = () => {
+    if (!revealingNpcEvent || !npcResolution) return;
+    setLastNpcEvent({
+      delivery_id: revealingNpcEvent.delivery_id,
+      title: revealingNpcEvent.title,
+      image_path: revealingNpcEvent.image_path,
+      description: revealingNpcEvent.description,
+      chosen_option_label: npcResolution.label,
+      chosen_effect: npcResolution.effect,
+      resolved_at: new Date().toISOString(),
+    });
+    setPendingNpcEvents((prev) => prev.filter((e) => e.delivery_id !== revealingNpcEvent.delivery_id));
+    setRevealingNpcEvent(null);
+    setNpcResolution(null);
   };
 
   const copyCode = (field: 'rejoin' | 'room', value: string) => {
@@ -1006,27 +1127,19 @@ export const PlayerApp: React.FC = () => {
             <h2 className="font-display text-base font-extrabold text-ink-800 leading-tight truncate">
               {joinedPlayer.name}
             </h2>
-            <div className="flex items-center gap-1.5 mt-1">
-              <button
-                type="button"
-                onClick={() => copyCode('rejoin', joinedPlayer.player_code)}
-                title="Tap to copy your rejoin code"
-                className="chip bg-white code-stamp !text-[11px] hover:bg-parchment-100 transition-colors"
-              >
-                {copiedField === 'rejoin' ? (
-                  <CheckCircle className="w-3 h-3 text-pip-leaf shrink-0" strokeWidth={2.75} />
-                ) : (
-                  <Key className="w-3 h-3 text-crimson-500 shrink-0" strokeWidth={2.75} />
-                )}
-                {joinedPlayer.player_code}
-              </button>
-              {typeof joinedPlayer.points === 'number' && (
-                <span className="chip bg-pip-gold !text-[11px]" title="Your points">
-                  <Star className="w-3 h-3 text-ink-900 shrink-0" strokeWidth={2.75} />
-                  {joinedPlayer.points}
-                </span>
+            <button
+              type="button"
+              onClick={() => copyCode('rejoin', joinedPlayer.player_code)}
+              title="Tap to copy your rejoin code"
+              className="chip bg-white code-stamp !text-[11px] mt-1 hover:bg-parchment-100 transition-colors"
+            >
+              {copiedField === 'rejoin' ? (
+                <CheckCircle className="w-3 h-3 text-pip-leaf shrink-0" strokeWidth={2.75} />
+              ) : (
+                <Key className="w-3 h-3 text-crimson-500 shrink-0" strokeWidth={2.75} />
               )}
-            </div>
+              {joinedPlayer.player_code}
+            </button>
           </div>
         </div>
 
@@ -1082,6 +1195,11 @@ export const PlayerApp: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5">
+            {typeof joinedPlayer.points === 'number' && (
+              <span className="chip bg-pip-gold shrink-0" title="Points your host has awarded you">
+                {joinedPlayer.points} {joinedPlayer.points === 1 ? 'point' : 'points'}
+              </span>
+            )}
             {DRAW_POOLS.filter((pool) => pendingDrawPools.includes(pool)).map((pool) => (
               <Token
                 key={pool}
@@ -1097,15 +1215,24 @@ export const PlayerApp: React.FC = () => {
 
             {/* Quick Demo Action Trigger for testing */}
             {isDemoMode && (
-              <button
-                onClick={() =>
-                  setPendingDrawPools((prev) => [...prev, DRAW_POOLS[prev.length % DRAW_POOLS.length]])
-                }
-                className="btn-icon"
-                title="Demo: queue a draw (cycles through the pools)"
-              >
-                <Plus className="w-4 h-4" strokeWidth={3} />
-              </button>
+              <>
+                <button
+                  onClick={() =>
+                    setPendingDrawPools((prev) => [...prev, DRAW_POOLS[prev.length % DRAW_POOLS.length]])
+                  }
+                  className="btn-icon"
+                  title="Demo: queue a draw (cycles through the pools)"
+                >
+                  <Plus className="w-4 h-4" strokeWidth={3} />
+                </button>
+                <button
+                  onClick={() => setPendingNpcEvents((prev) => [...prev, DEMO_NPC_EVENT])}
+                  className="btn-icon"
+                  title="Demo: trigger an NPC event"
+                >
+                  <Ghost className="w-4 h-4" strokeWidth={3} />
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1124,6 +1251,25 @@ export const PlayerApp: React.FC = () => {
               </span>
               <span className="block text-[11px] font-semibold text-ink-500">
                 Resolved at the table, not held — tap to look again
+              </span>
+            </span>
+          </button>
+        )}
+
+        {/* The last NPC event resolved. Same shape as the event-card recall
+            strip above -- it never entered the hand either. */}
+        {lastNpcEvent && (
+          <button
+            onClick={() => setShowLastNpcEvent(true)}
+            className="slab w-full mb-4 px-3 py-2.5 flex items-center gap-2.5 text-left"
+          >
+            <Token tone="gold" size="sm" icon={Ghost} />
+            <span className="min-w-0">
+              <span className="block font-display font-extrabold text-xs text-ink-800 truncate">
+                Latest NPC event: {lastNpcEvent.title}
+              </span>
+              <span className="block text-[11px] font-semibold text-ink-500 truncate">
+                You chose "{lastNpcEvent.chosen_option_label}" — tap to look again
               </span>
             </span>
           </button>
@@ -1284,6 +1430,107 @@ export const PlayerApp: React.FC = () => {
             >
               Resolved
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* NPC Event Reveal — pushed by the host, not drawn. Shows the scenario
+          and its options first; once one is chosen, swaps to the effect. */}
+      {revealingNpcEvent && (
+        <div className="board-scrim">
+          <div className="relative max-w-sm w-full flex flex-col items-center animate-pop">
+            <div className="chip bg-pip-gold mb-3">
+              <Ghost className="w-3.5 h-3.5" strokeWidth={2.75} /> NPC event
+            </div>
+
+            <div className="frame w-full flex flex-col select-none">
+              {revealingNpcEvent.image_path && (
+                <div className="relative aspect-[4/3] w-full rounded-[0.7rem] overflow-hidden bg-parchment-100 mb-3">
+                  <img
+                    src={getNpcImageUrl(revealingNpcEvent.image_path)}
+                    alt={revealingNpcEvent.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+
+              <h3 className="font-display text-lg font-extrabold text-ink-800 text-center leading-tight mb-2">
+                {revealingNpcEvent.title}
+              </h3>
+
+              <p className="text-sm font-semibold text-ink-700 text-left leading-snug mb-4 px-1 whitespace-pre-line">
+                {revealingNpcEvent.description}
+              </p>
+
+              {npcResolution ? (
+                <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left">
+                  <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500 mb-1.5">
+                    You chose: {npcResolution.label}
+                  </p>
+                  <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{npcResolution.effect}</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {revealingNpcEvent.options.map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => handleChooseNpcOption(option.id)}
+                      disabled={isResolvingNpcEvent}
+                      className="btn-paper w-full !py-3 !text-sm disabled:opacity-60"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {npcResolution && (
+              <button
+                onClick={handleDismissNpcReveal}
+                className="btn-violet w-full max-w-[340px] !py-3 !text-sm mt-3"
+              >
+                Continue
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* NPC Event Recall — read-only look back at the last one resolved */}
+      {showLastNpcEvent && lastNpcEvent && (
+        <div className="board-scrim">
+          <div className="relative max-w-sm w-full flex flex-col items-center animate-pop">
+            <button
+              onClick={() => setShowLastNpcEvent(false)}
+              className="btn-paper !py-1.5 !px-3 !text-xs absolute -top-12 right-0"
+            >
+              Close <X className="w-4 h-4" strokeWidth={3} />
+            </button>
+
+            <div className="frame w-full flex flex-col select-none">
+              {lastNpcEvent.image_path && (
+                <div className="relative aspect-[4/3] w-full rounded-[0.7rem] overflow-hidden bg-parchment-100 mb-3">
+                  <img
+                    src={getNpcImageUrl(lastNpcEvent.image_path)}
+                    alt={lastNpcEvent.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+              <h3 className="font-display text-lg font-extrabold text-ink-800 text-center leading-tight mb-2">
+                {lastNpcEvent.title}
+              </h3>
+              <p className="text-sm font-semibold text-ink-700 text-left leading-snug mb-4 px-1 whitespace-pre-line">
+                {lastNpcEvent.description}
+              </p>
+              <div className="slab !border-pip-gold bg-pip-gold/10 p-4 text-left">
+                <p className="font-display font-extrabold text-xs uppercase tracking-wide text-ink-500 mb-1.5">
+                  You chose: {lastNpcEvent.chosen_option_label}
+                </p>
+                <p className="text-sm font-semibold text-ink-800 leading-snug whitespace-pre-line">{lastNpcEvent.chosen_effect}</p>
+              </div>
+            </div>
           </div>
         </div>
       )}

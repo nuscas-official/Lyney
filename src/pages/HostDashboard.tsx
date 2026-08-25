@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   Shield, Users, Layers, RotateCcw, Plus, Minus, Trash2,
-  UserX, UserCheck, RefreshCw, Sliders, X, Zap, Star,
+  UserX, UserCheck, RefreshCw, Sliders, X, Zap, Star, Ghost, Dices,
 } from 'lucide-react';
-import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl } from '../lib/supabase';
+import { supabase, isDemoMode, ensureAuthSession, getAvatarUrl, getNpcImageUrl, listNpcImagePaths } from '../lib/supabase';
 import { Token, Standee, PaperChip, BoardHeading } from '../components/BoardBits';
-import { Card, CardKind, DrawPool } from '../types/database';
+import { NpcEventCatalogEditor } from '../components/NpcEventCatalogEditor';
+import { Card, CardKind, DrawPool, NpcEventCatalogEntry, RoomNpcDelivery } from '../types/database';
 import {
   CARD_KINDS, DRAW_POOLS, KIND_LABEL, KIND_TONE, POOL_KINDS, POOL_LABEL, POOL_TONE,
 } from '../lib/pools';
@@ -74,6 +75,42 @@ const INITIAL_DEMO_PLAYERS: HostPlayer[] = [
 // and +5/+10 pairs read outward from the points total like a number line.
 const POINT_PRESETS = [5, 10];
 
+// Sample NPC event catalog for standalone local demo mode -- one event, two
+// scenarios, a couple of options each, enough to click through the flow.
+const INITIAL_DEMO_NPC_CATALOG: NpcEventCatalogEntry[] = [
+  {
+    id: 'npc1',
+    title: 'The Wandering Merchant',
+    image_path: null,
+    active: true,
+    scenarios: [
+      {
+        id: 'sc1',
+        npc_event_id: 'npc1',
+        description: 'A cloaked trader offers you a curious vial for a steep price.',
+        weight: 2,
+        active: true,
+        options: [
+          { id: 'o1', scenario_id: 'sc1', label: 'Buy it', effect: 'The vial fizzes strangely -- you feel lucky.', sort_order: 0 },
+          { id: 'o2', scenario_id: 'sc1', label: 'Haggle', effect: 'The merchant halves the price, grumbling.', sort_order: 1 },
+          { id: 'o3', scenario_id: 'sc1', label: 'Walk away', effect: 'The merchant shrugs and vanishes into the crowd.', sort_order: 2 },
+        ],
+      },
+      {
+        id: 'sc2',
+        npc_event_id: 'npc1',
+        description: 'The merchant recognizes you and offers a "loyalty discount."',
+        weight: 1,
+        active: true,
+        options: [
+          { id: 'o4', scenario_id: 'sc2', label: 'Accept and think seriously', effect: 'You get a fair deal -- and a warning to be careful.', sort_order: 0 },
+          { id: 'o5', scenario_id: 'sc2', label: 'Decline politely', effect: 'The merchant nods and moves on.', sort_order: 1 },
+        ],
+      },
+    ],
+  },
+];
+
 const HOST_SESSION_KEY = 'lyney_host_session';
 
 export const HostDashboard: React.FC = () => {
@@ -86,14 +123,21 @@ export const HostDashboard: React.FC = () => {
   const [isRestoringSession, setIsRestoringSession] = useState(!isDemoMode);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Tab navigation: 'overview' | 'catalog'
-  const [activeTab, setActiveTab] = useState<'overview' | 'catalog'>('overview');
+  // Tab navigation: 'overview' | 'catalog' | 'npc'
+  const [activeTab, setActiveTab] = useState<'overview' | 'catalog' | 'npc'>('overview');
 
   // Room data state (empty when connected to Supabase!)
   const [players, setPlayers] = useState<HostPlayer[]>(isDemoMode ? INITIAL_DEMO_PLAYERS : []);
   const [cards, setCards] = useState<Card[]>(isDemoMode ? INITIAL_DEMO_CARDS : []);
   const [recentEvents, setRecentEvents] = useState<RoomEvent[]>([]);
   const [lastActionText, setLastActionText] = useState<string | null>(null);
+
+  // NPC event catalog + the room's recent deliveries feed
+  const [npcCatalog, setNpcCatalog] = useState<NpcEventCatalogEntry[]>(
+    isDemoMode ? INITIAL_DEMO_NPC_CATALOG : []
+  );
+  const [npcImageChoices, setNpcImageChoices] = useState<string[]>([]);
+  const [npcDeliveries, setNpcDeliveries] = useState<RoomNpcDelivery[]>([]);
 
   // Permission Bar Controls
   const [permScope, setPermScope] = useState<'room' | 'player'>('room');
@@ -102,6 +146,16 @@ export const HostDashboard: React.FC = () => {
   const [permPool, setPermPool] = useState<DrawPool>('mixed');
   const [permCount, setPermCount] = useState(1);
   const [windowOpen, setWindowOpen] = useState(false);
+
+  // NPC event trigger controls -- separate state from the card permission
+  // controller above so picking a target for one doesn't disturb the other.
+  const [npcScope, setNpcScope] = useState<'room' | 'player'>('room');
+  const [npcTargetPlayerId, setNpcTargetPlayerId] = useState('');
+  // fetchNpcCatalog (which otherwise defaults this) is a no-op in demo mode,
+  // same as fetchRoomData is for selectedGrantCardId -- so the demo catalog's
+  // first event is seeded straight into the initial state instead.
+  const [npcEventId, setNpcEventId] = useState(isDemoMode ? INITIAL_DEMO_NPC_CATALOG[0]?.id || '' : '');
+  const [npcScenarioId, setNpcScenarioId] = useState(''); // '' = random
 
   // Grant Card Modal
   const [selectedPlayer, setSelectedPlayer] = useState<HostPlayer | null>(null);
@@ -185,8 +239,29 @@ export const HostDashboard: React.FC = () => {
           at: e.at,
         }))
       );
+      setNpcDeliveries(data.npc_deliveries || []);
     } catch (err) {
       console.error('Error fetching room data:', err);
+    }
+  };
+
+  // Fetch the host-only NPC event catalog. Not tied to any room -- the
+  // catalog is shared across every table the host runs -- so it is refetched
+  // after catalog edits rather than on every room realtime tick.
+  const fetchNpcCatalog = async () => {
+    if (isDemoMode) return;
+    try {
+      const { data, error } = await supabase.rpc('host_get_npc_catalog');
+      if (error) {
+        console.error('Error fetching NPC catalog:', error);
+        return;
+      }
+      const catalog: NpcEventCatalogEntry[] = data || [];
+      setNpcCatalog(catalog);
+      const firstActive = catalog.find((e) => e.active);
+      if (firstActive && !npcEventId) setNpcEventId(firstActive.id);
+    } catch (err) {
+      console.error('Error fetching NPC catalog:', err);
     }
   };
 
@@ -255,6 +330,7 @@ export const HostDashboard: React.FC = () => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_code=eq.${cleanRoom}` }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'held_cards', filter: `room_code=eq.${cleanRoom}` }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_actions', filter: `room_code=eq.${cleanRoom}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'npc_event_deliveries', filter: `room_code=eq.${cleanRoom}` }, refresh)
       .subscribe((status) => {
         const wasHealthy = socketHealthy;
         socketHealthy = status === 'SUBSCRIBED';
@@ -281,6 +357,15 @@ export const HostDashboard: React.FC = () => {
       supabase.removeChannel(channel);
     };
   }, [isHostAuthenticated, roomCode]);
+
+  // NPC catalog + portrait bucket listing: loaded once per session rather
+  // than on every room realtime tick, since neither is scoped to a room.
+  useEffect(() => {
+    if (isDemoMode || !isHostAuthenticated) return;
+    fetchNpcCatalog();
+    listNpcImagePaths().then(setNpcImageChoices);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHostAuthenticated]);
 
   // Host Login / Room Creation submit
   const handleHostLogin = async (e: React.FormEvent) => {
@@ -728,6 +813,244 @@ export const HostDashboard: React.FC = () => {
     );
   };
 
+  // Trigger an NPC event on a player or the whole room -- an immediate push,
+  // the same shape as host_draw/grant_card, with no permission-window step.
+  const handleTriggerNpcEvent = async () => {
+    const cleanRoom = roomCode.trim().toUpperCase();
+    const event = npcCatalog.find((e) => e.id === npcEventId);
+    if (!event) return;
+
+    if (isDemoMode) {
+      const activeScenarios = event.scenarios.filter((s) => s.active);
+      const scenario =
+        activeScenarios.find((s) => s.id === npcScenarioId) ||
+        activeScenarios[Math.floor(Math.random() * activeScenarios.length)];
+      if (!scenario) {
+        alert('This event has no active scenarios to trigger.');
+        return;
+      }
+
+      const targets =
+        npcScope === 'room'
+          ? activePlayers
+          : activePlayers.filter((p) => p.id === npcTargetPlayerId);
+
+      setNpcDeliveries((prev) => [
+        ...targets.map((p) => ({
+          delivery_id: `d-${Date.now()}-${p.id}`,
+          player_id: p.id,
+          npc_event_id: event.id,
+          title: event.title,
+          image_path: event.image_path,
+          description: scenario.description,
+          chosen_option_label: null,
+          chosen_effect: null,
+          issued_at: new Date().toISOString(),
+          resolved_at: null,
+        })),
+        ...prev,
+      ]);
+      setLastActionText(`Triggered "${event.title}" on ${npcScope === 'room' ? 'the room' : targets[0]?.name || 'a player'}`);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('trigger_npc_event', {
+        p_room_code: cleanRoom,
+        p_scope: npcScope,
+        p_npc_event_id: npcEventId,
+        p_target_id: npcScope === 'player' ? npcTargetPlayerId || null : null,
+        p_scenario_id: npcScenarioId || null,
+      });
+
+      if (error) {
+        if (error.code === 'P0033' || error.message.includes('no_active_scenarios')) {
+          alert('This event has no active scenarios to trigger. Add one, or reactivate an existing one.');
+        } else {
+          alert(error.message);
+        }
+        return;
+      }
+
+      if (!data?.issued_count) {
+        alert(
+          npcScope === 'player'
+            ? 'That player is not active right now, so nothing was triggered.'
+            : 'Nobody is active in the room right now, so nothing was triggered.'
+        );
+        return;
+      }
+
+      setLastActionText(`Triggered "${event.title}" on ${npcScope === 'room' ? 'the room' : 'a player'}`);
+      fetchRoomData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to trigger NPC event');
+    }
+  };
+
+  // NPC catalog CRUD -- each handler mirrors the card catalog's edit style
+  // (optimistic where cheap, otherwise just refetch), and is passed down to
+  // NpcEventCatalogEditor rather than duplicated there.
+  const handleSaveNpcEvent = async (input: { id?: string; title: string; imagePath: string | null; active: boolean }) => {
+    if (isDemoMode) {
+      setNpcCatalog((prev) =>
+        input.id
+          ? prev.map((e) => (e.id === input.id ? { ...e, title: input.title, image_path: input.imagePath, active: input.active } : e))
+          : [...prev, { id: `npc-${Date.now()}`, title: input.title, image_path: input.imagePath, active: input.active, scenarios: [] }]
+      );
+      return;
+    }
+    const { error } = await supabase.rpc('save_npc_event', {
+      p_id: input.id || null,
+      p_title: input.title,
+      p_image_path: input.imagePath,
+      p_active: input.active,
+    });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    fetchNpcCatalog();
+  };
+
+  const handleDeleteNpcEvent = async (id: string) => {
+    if (!window.confirm('Delete this NPC event and every scenario and option under it?')) return;
+    if (isDemoMode) {
+      setNpcCatalog((prev) => prev.filter((e) => e.id !== id));
+      return;
+    }
+    const { error } = await supabase.rpc('delete_npc_event', { p_id: id });
+    if (error) {
+      if (error.code === 'P0030' || error.message.includes('npc_event_in_use')) {
+        alert('Players have already received this event, so it carries history. Deactivate it instead of deleting it.');
+      } else {
+        alert(error.message);
+      }
+      return;
+    }
+    fetchNpcCatalog();
+  };
+
+  const handleSaveNpcScenario = async (input: { id?: string; npcEventId: string; description: string; weight: number; active: boolean }) => {
+    if (isDemoMode) {
+      setNpcCatalog((prev) =>
+        prev.map((e) => {
+          if (e.id !== input.npcEventId) return e;
+          if (input.id) {
+            return {
+              ...e,
+              scenarios: e.scenarios.map((s) =>
+                s.id === input.id ? { ...s, description: input.description, weight: input.weight, active: input.active } : s
+              ),
+            };
+          }
+          return {
+            ...e,
+            scenarios: [
+              ...e.scenarios,
+              { id: `sc-${Date.now()}`, npc_event_id: e.id, description: input.description, weight: input.weight, active: input.active, options: [] },
+            ],
+          };
+        })
+      );
+      return;
+    }
+    const { error } = await supabase.rpc('save_npc_scenario', {
+      p_id: input.id || null,
+      p_npc_event_id: input.npcEventId,
+      p_description: input.description,
+      p_weight: input.weight,
+      p_active: input.active,
+    });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    fetchNpcCatalog();
+  };
+
+  const handleDeleteNpcScenario = async (id: string) => {
+    if (!window.confirm('Delete this scenario and every option under it?')) return;
+    if (isDemoMode) {
+      setNpcCatalog((prev) => prev.map((e) => ({ ...e, scenarios: e.scenarios.filter((s) => s.id !== id) })));
+      return;
+    }
+    const { error } = await supabase.rpc('delete_npc_scenario', { p_id: id });
+    if (error) {
+      if (error.code === 'P0031' || error.message.includes('npc_scenario_in_use')) {
+        alert('Players have already received this scenario, so it carries history. Deactivate it instead of deleting it.');
+      } else {
+        alert(error.message);
+      }
+      return;
+    }
+    fetchNpcCatalog();
+  };
+
+  const handleSaveNpcOption = async (input: { id?: string; scenarioId: string; label: string; effect: string; sortOrder: number }) => {
+    if (isDemoMode) {
+      setNpcCatalog((prev) =>
+        prev.map((e) => ({
+          ...e,
+          scenarios: e.scenarios.map((s) => {
+            if (s.id !== input.scenarioId) return s;
+            if (input.id) {
+              return {
+                ...s,
+                options: s.options.map((o) =>
+                  o.id === input.id ? { ...o, label: input.label, effect: input.effect, sort_order: input.sortOrder } : o
+                ),
+              };
+            }
+            return {
+              ...s,
+              options: [
+                ...s.options,
+                { id: `o-${Date.now()}`, scenario_id: s.id, label: input.label, effect: input.effect, sort_order: input.sortOrder },
+              ],
+            };
+          }),
+        }))
+      );
+      return;
+    }
+    const { error } = await supabase.rpc('save_npc_option', {
+      p_id: input.id || null,
+      p_scenario_id: input.scenarioId,
+      p_label: input.label,
+      p_effect: input.effect,
+      p_sort_order: input.sortOrder,
+    });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    fetchNpcCatalog();
+  };
+
+  const handleDeleteNpcOption = async (id: string) => {
+    if (!window.confirm('Delete this option?')) return;
+    if (isDemoMode) {
+      setNpcCatalog((prev) =>
+        prev.map((e) => ({
+          ...e,
+          scenarios: e.scenarios.map((s) => ({ ...s, options: s.options.filter((o) => o.id !== id) })),
+        }))
+      );
+      return;
+    }
+    const { error } = await supabase.rpc('delete_npc_option', { p_id: id });
+    if (error) {
+      if (error.code === 'P0032' || error.message.includes('npc_option_in_use')) {
+        alert('A player already chose this option, so it carries history. Edit its text instead of deleting it.');
+      } else {
+        alert(error.message);
+      }
+      return;
+    }
+    fetchNpcCatalog();
+  };
+
   const handleSignOut = () => {
     localStorage.removeItem(HOST_SESSION_KEY);
     setIsHostAuthenticated(false);
@@ -901,6 +1224,14 @@ export const HostDashboard: React.FC = () => {
               }`}
             >
               Catalog ({cards.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('npc')}
+              className={`px-3 py-1.5 rounded-xl font-display font-bold text-xs transition-colors ${
+                activeTab === 'npc' ? 'bg-pip-cyan text-ink-900 shadow-sticker-sm' : 'text-ink-500 hover:text-ink-800'
+              }`}
+            >
+              NPC Events ({npcCatalog.length})
             </button>
           </div>
 
@@ -1093,6 +1424,124 @@ export const HostDashboard: React.FC = () => {
                       </span>
                     </span>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* NPC Event Controller — an immediate push, no window to close */}
+            <div className="panel p-4 sm:p-5 space-y-4">
+              <BoardHeading
+                icon={Ghost}
+                tone="gold"
+                title="NPC event controller"
+                subtitle="Trigger an encounter now — pick a scenario, or let it roll"
+              />
+
+              {npcCatalog.filter((e) => e.active).length === 0 ? (
+                <p className="text-xs font-semibold text-ink-500">
+                  No active NPC events yet. Add one from the NPC Events tab.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="field-label">Scope</label>
+                      <select
+                        value={npcScope}
+                        onChange={(e) => setNpcScope(e.target.value as any)}
+                        className="field !py-2.5 !text-sm"
+                      >
+                        <option value="room">Whole room ({activePlayers.length})</option>
+                        <option value="player">Single player</option>
+                      </select>
+                    </div>
+
+                    {npcScope === 'player' && (
+                      <div>
+                        <label className="field-label">Player</label>
+                        <select
+                          value={npcTargetPlayerId}
+                          onChange={(e) => setNpcTargetPlayerId(e.target.value)}
+                          className="field !py-2.5 !text-sm"
+                        >
+                          {activePlayers.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="field-label">Event</label>
+                      <select
+                        value={npcEventId}
+                        onChange={(e) => {
+                          setNpcEventId(e.target.value);
+                          setNpcScenarioId('');
+                        }}
+                        className="field !py-2.5 !text-sm"
+                      >
+                        {npcCatalog.filter((e) => e.active).map((e) => (
+                          <option key={e.id} value={e.id}>{e.title}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="field-label">Scenario</label>
+                      <select
+                        value={npcScenarioId}
+                        onChange={(e) => setNpcScenarioId(e.target.value)}
+                        className="field !py-2.5 !text-sm"
+                      >
+                        <option value="">Random</option>
+                        {(npcCatalog.find((e) => e.id === npcEventId)?.scenarios || [])
+                          .filter((s) => s.active)
+                          .map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.description.length > 40 ? `${s.description.slice(0, 40)}…` : s.description}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <button onClick={handleTriggerNpcEvent} className="btn-violet w-full sm:w-auto !py-4 !px-6">
+                    <Token tone="gold" size="xs" icon={npcScenarioId ? Ghost : Dices} className="!ring-2" />
+                    Trigger NPC event
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* NPC Event Feed — pending and resolved deliveries for this room */}
+            {npcDeliveries.length > 0 && (
+              <div className="panel p-4 sm:p-5 space-y-3">
+                <BoardHeading
+                  icon={Ghost}
+                  tone="gold"
+                  title="NPC events"
+                  subtitle="Who has one pending, and what everyone chose"
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  {npcDeliveries.map((d) => {
+                    const player = players.find((p) => p.id === d.player_id);
+                    return (
+                      <span
+                        key={d.delivery_id}
+                        className={`chip ${d.resolved_at ? 'bg-pip-gold' : 'bg-white animate-pulse'}`}
+                        title={d.resolved_at ? `${d.chosen_option_label}: ${d.chosen_effect}` : 'Waiting on the player'}
+                      >
+                        <span className="truncate max-w-[100px] opacity-80">{player?.name || 'Unknown player'}</span>
+                        <span className="truncate max-w-[140px]">{d.title}</span>
+                        {d.resolved_at ? (
+                          <span className="truncate max-w-[120px] font-extrabold">{d.chosen_option_label}</span>
+                        ) : (
+                          <span className="italic opacity-70">pending…</span>
+                        )}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1407,6 +1856,20 @@ export const HostDashboard: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* NPC EVENTS TAB */}
+        {activeTab === 'npc' && (
+          <NpcEventCatalogEditor
+            catalog={npcCatalog}
+            imageChoices={npcImageChoices}
+            onSaveEvent={handleSaveNpcEvent}
+            onDeleteEvent={handleDeleteNpcEvent}
+            onSaveScenario={handleSaveNpcScenario}
+            onDeleteScenario={handleDeleteNpcScenario}
+            onSaveOption={handleSaveNpcOption}
+            onDeleteOption={handleDeleteNpcOption}
+          />
         )}
       </main>
 
