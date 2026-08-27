@@ -1159,7 +1159,7 @@ export const PlayerApp: React.FC = () => {
                 {avatarsLoading ? (
                   <p className="text-xs font-semibold text-ink-400 py-3">Laying out the pieces…</p>
                 ) : (
-                  <div className="flex flex-wrap gap-3 py-1">
+                  <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3 py-1 justify-items-center">
                     {avatarChoices.map((path) => {
                       const selected = avatarPath === path;
                       return (
