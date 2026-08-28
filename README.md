@@ -1,5 +1,7 @@
 # Lyney — Card Draw System
 
+<img width="1764" height="1186" alt="lyney vercel app_host (1)" src="https://github.com/user-attachments/assets/52452f8c-5940-43e3-89b0-f6926bdb195d" />
+
 Lyney is a high-reliability, real-time web application designed for running physical board game activities without printed cards (~100 participants, ~12 per group, ~9 concurrent rooms).
 
 ## Tech Stack
